@@ -1,0 +1,21 @@
+{
+  "dependencies": {
+    "@next/swc-win32-x64-msvc": "^16.3.2",
+    "@supabase/supabase-js": "^2.112.3",
+    "next": "^16.3.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "twilio": "^6.1.0"
+  },
+  "scripts": {
+    "build": "next build",
+    "start": "next start",
+    "dev": "next dev"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "typescript": "^7.0.2"
+  }
+}
