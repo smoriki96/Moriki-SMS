@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
 
 type PaymentState = "verifying" | "success" | "failed";
 
-export default function PaymentSuccessPage() {
+function PaymentSuccessContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -30,7 +30,6 @@ export default function PaymentSuccessPage() {
       }
 
       try {
-        // Get the currently logged-in user
         const {
           data: { user },
           error: userError,
@@ -44,7 +43,6 @@ export default function PaymentSuccessPage() {
           return;
         }
 
-        // Verify payment with our server
         const verifyResponse = await fetch(
           `/api/paystack/verify?reference=${encodeURIComponent(
             reference
@@ -66,7 +64,6 @@ export default function PaymentSuccessPage() {
           return;
         }
 
-        // Get order information from Paystack metadata
         const metadata = payment.metadata;
 
         const country = metadata?.country;
@@ -80,7 +77,6 @@ export default function PaymentSuccessPage() {
           return;
         }
 
-        // Create order in Supabase
         const orderResponse = await fetch(
           "/api/orders",
           {
@@ -103,10 +99,10 @@ export default function PaymentSuccessPage() {
         const order = await orderResponse.json();
 
         if (!orderResponse.ok) {
-          // If the order already exists, don't
-          // treat the payment itself as failed.
           if (
-            order.error?.toLowerCase().includes("duplicate") ||
+            order.error
+              ?.toLowerCase()
+              .includes("duplicate") ||
             order.error
               ?.toLowerCase()
               .includes("unique")
@@ -312,7 +308,7 @@ export default function PaymentSuccessPage() {
 
             <button
               onClick={() =>
-                router.push("/dashboard")
+                router.push("/admin/dashboard")
               }
               style={{
                 width: "100%",
@@ -362,7 +358,9 @@ export default function PaymentSuccessPage() {
             </p>
 
             <button
-              onClick={() => router.push("/dashboard")}
+              onClick={() =>
+                router.push("/admin/dashboard")
+              }
               style={{
                 width: "100%",
                 marginTop: "25px",
@@ -382,5 +380,33 @@ export default function PaymentSuccessPage() {
         )}
       </div>
     </main>
+  );
+}
+
+function PaymentSuccessLoading() {
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "#020617",
+        color: "#ffffff",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
+      <p style={{ color: "#94a3b8" }}>
+        Loading payment...
+      </p>
+    </main>
+  );
+}
+
+export default function PaymentSuccessPage() {
+  return (
+    <Suspense fallback={<PaymentSuccessLoading />}>
+      <PaymentSuccessContent />
+    </Suspense>
   );
 }

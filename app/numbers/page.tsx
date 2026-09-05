@@ -1,273 +1,893 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "../../lib/supabase";
 
 type Country = {
-  code: string;
+  key: string;
   name: string;
-  iso?: string;
-  prefix?: string;
+  operators: string[];
 };
 
-type Service = string;
+type Product = {
+  name: string;
+  category?: string | null;
+  quantity: number;
+  priceUSD: number;
+  basePriceNGN: number;
+  profitNGN: number;
+  priceNGN: number;
+};
 
-type Operator = {
+type SearchResult = {
+  country: string;
   operator: string;
-  operatorName: string;
-  providerPrice: number;
-  stock: number;
-  customerPrice: number;
+  service: string;
+  quantity: number;
+  priceUSD: number;
+  basePriceNGN: number;
+  profitNGN: number;
+  priceNGN: number;
   currency: string;
 };
 
-export default function NumbersPage() {
-  const [countries, setCountries] = useState<Country[]>([]);
-  const [services, setServices] = useState<Service[]>([]);
-  const [operators, setOperators] = useState<Operator[]>([]);
+function naira(value: number) {
+  return `₦${Number(value || 0).toLocaleString("en-NG")}`;
+}
 
-  const [country, setCountry] = useState("");
-  const [service, setService] = useState("");
+function pretty(value: string) {
+  return String(value || "")
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (letter) =>
+      letter.toUpperCase()
+    );
+}
+
+export default function NumbersPage() {
+  const router = useRouter();
+
+  const [countries, setCountries] =
+    useState<Country[]>([]);
+
+  const [country, setCountry] =
+    useState("");
+
+  const [operator, setOperator] =
+    useState("");
+
+  const [service, setService] =
+    useState("");
+
+  const [products, setProducts] =
+    useState<Product[]>([]);
+
+  const [results, setResults] =
+    useState<SearchResult[]>([]);
 
   const [loadingCountries, setLoadingCountries] =
     useState(true);
-  const [loadingServices, setLoadingServices] =
-    useState(false);
-  const [loadingOperators, setLoadingOperators] =
+
+  const [loadingProducts, setLoadingProducts] =
     useState(false);
 
-  const [error, setError] = useState("");
-  const [buyingOperator, setBuyingOperator] =
+  const [searching, setSearching] =
+    useState(false);
+
+  const [buying, setBuying] =
+    useState(false);
+
+  const [error, setError] =
     useState("");
 
+  const [message, setMessage] =
+    useState("");
+
+  /*
+   * ========================================
+   * LOAD COUNTRIES
+   * ========================================
+   */
   useEffect(() => {
+    async function loadCountries() {
+      try {
+        setLoadingCountries(true);
+        setError("");
+
+        const response = await fetch(
+          "/api/5sim?action=countries",
+          {
+            cache: "no-store",
+          }
+        );
+
+        const text =
+          await response.text();
+
+        let data: any;
+
+        try {
+          data = JSON.parse(text);
+        } catch {
+          throw new Error(
+            "The server returned an invalid response while loading countries."
+          );
+        }
+
+        if (
+          !response.ok ||
+          !data.success
+        ) {
+          throw new Error(
+            data?.error ||
+              "Unable to load countries."
+          );
+        }
+
+        const incoming =
+          Array.isArray(
+            data.countries
+          )
+            ? data.countries
+            : [];
+
+        const uniqueMap =
+          new Map<
+            string,
+            Country
+          >();
+
+        incoming.forEach(
+          (item: any) => {
+            const realKey =
+              item?.key ||
+              item?.code ||
+              item?.country;
+
+            if (
+              typeof realKey !==
+                "string" ||
+              !realKey.trim()
+            ) {
+              return;
+            }
+
+            const key =
+              realKey
+                .trim()
+                .toLowerCase();
+
+            const name =
+              item?.name ||
+              item?.text_en ||
+              pretty(key);
+
+            let operators: string[] =
+              [];
+
+            if (
+              Array.isArray(
+                item?.operators
+              )
+            ) {
+              operators =
+                item.operators
+                  .map(
+                    (value: any) =>
+                      String(value)
+                  )
+                  .filter(Boolean);
+            }
+
+            /*
+             * Some 5SIM responses store
+             * operators as object keys.
+             */
+            if (
+              operators.length ===
+                0 &&
+              item &&
+              typeof item ===
+                "object"
+            ) {
+              const ignoredKeys =
+                new Set([
+                  "key",
+                  "code",
+                  "country",
+                  "name",
+                  "text_en",
+                  "text_ru",
+                  "iso",
+                  "prefix",
+                ]);
+
+              operators =
+                Object.keys(
+                  item
+                ).filter(
+                  (operatorName) =>
+                    !ignoredKeys.has(
+                      operatorName
+                    ) &&
+                    item[
+                      operatorName
+                    ] &&
+                    typeof item[
+                      operatorName
+                    ] === "object"
+                );
+            }
+
+            operators =
+              Array.from(
+                new Set(
+                  operators
+                )
+              ).sort();
+
+            uniqueMap.set(
+              key,
+              {
+                key,
+                name: String(
+                  name
+                ),
+                operators,
+              }
+            );
+          }
+        );
+
+        const unique =
+          Array.from(
+            uniqueMap.values()
+          ).sort((a, b) =>
+            a.name.localeCompare(
+              b.name
+            )
+          );
+
+        if (
+          unique.length === 0
+        ) {
+          throw new Error(
+            "No valid 5SIM countries were returned."
+          );
+        }
+
+        setCountries(
+          unique
+        );
+      } catch (err) {
+        setCountries([]);
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load countries."
+        );
+      } finally {
+        setLoadingCountries(
+          false
+        );
+      }
+    }
+
     loadCountries();
   }, []);
 
-  async function loadCountries() {
-    try {
-      setLoadingCountries(true);
-      setError("");
-
-      const response = await fetch(
-        "/api/5sim/countries",
-        {
-          cache: "no-store",
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(
-          data.error ||
-            "Unable to load countries."
-        );
-      }
-
-      setCountries(data.countries || []);
-    } catch (err) {
-      console.error(
-        "COUNTRIES ERROR:",
-        err
-      );
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to load countries."
-      );
-    } finally {
-      setLoadingCountries(false);
-    }
-  }
-
-  async function handleCountryChange(
-    value: string
-  ) {
-    setCountry(value);
-    setService("");
-    setServices([]);
-    setOperators([]);
-    setError("");
-
-    if (!value) return;
-
-    try {
-      setLoadingServices(true);
-
-      const response = await fetch(
-        `/api/5sim/products?country=${encodeURIComponent(
-          value
-        )}`,
-        {
-          cache: "no-store",
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(
-          data.error ||
-            "Unable to load services."
-        );
-      }
-
-      setServices(
-        Array.isArray(data.services)
-          ? data.services
-          : []
-      );
-    } catch (err) {
-      console.error(
-        "SERVICES ERROR:",
-        err
-      );
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to load services."
-      );
-    } finally {
-      setLoadingServices(false);
-    }
-  }
-
-  async function handleServiceChange(
-    value: string
-  ) {
-    setService(value);
-    setOperators([]);
-    setError("");
-
-    if (!country || !value) return;
-
-    try {
-      setLoadingOperators(true);
-
-      const response = await fetch(
-        `/api/5sim/products?country=${encodeURIComponent(
+  /*
+   * ========================================
+   * SELECTED COUNTRY
+   * ========================================
+   */
+  const selectedCountry =
+    useMemo(() => {
+      return countries.find(
+        (item) =>
+          item.key ===
           country
-        )}&product=${encodeURIComponent(
-          value
-        )}`,
-        {
-          cache: "no-store",
-        }
       );
+    }, [
+      countries,
+      country,
+    ]);
 
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(
-          data.error ||
-            "Unable to load operators."
-        );
+  const operators =
+    useMemo(() => {
+      if (
+        !selectedCountry
+      ) {
+        return [];
       }
 
-      setOperators(
-        Array.isArray(data.operators)
-          ? data.operators
-          : []
-      );
-    } catch (err) {
-      console.error(
-        "OPERATORS ERROR:",
-        err
-      );
+      return Array.from(
+        new Set(
+          selectedCountry
+            .operators || []
+        )
+      ).sort();
+    }, [
+      selectedCountry,
+    ]);
 
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to load operators."
-      );
-    } finally {
-      setLoadingOperators(false);
+  /*
+   * ========================================
+   * COUNTRY CHANGED
+   * ========================================
+   */
+  useEffect(() => {
+    setOperator("");
+    setService("");
+    setProducts([]);
+    setResults([]);
+    setMessage("");
+  }, [country]);
+
+  /*
+   * ========================================
+   * LOAD SERVICES
+   * ========================================
+   */
+  useEffect(() => {
+    if (!country) {
+      return;
     }
-  }
 
-  async function buyNumber(
-    operator: Operator
-  ) {
-    if (!country || !service) {
+    async function loadServices() {
+      try {
+        setLoadingProducts(
+          true
+        );
+        setError("");
+        setService("");
+        setResults([]);
+
+        /*
+         * If operator is empty,
+         * the API will automatically
+         * choose a real 5SIM operator.
+         */
+        const selectedOperator =
+          operator || "any";
+
+        const url =
+          `/api/5sim?action=products` +
+          `&country=${encodeURIComponent(
+            country
+          )}` +
+          `&operator=${encodeURIComponent(
+            selectedOperator
+          )}`;
+
+        console.log(
+          "Loading 5SIM products:",
+          {
+            country,
+            operator:
+              selectedOperator,
+            url,
+          }
+        );
+
+        const response =
+          await fetch(
+            url,
+            {
+              cache:
+                "no-store",
+            }
+          );
+
+        const text =
+          await response.text();
+
+        let data: any;
+
+        try {
+          data =
+            JSON.parse(
+              text
+            );
+        } catch {
+          throw new Error(
+            "The server returned an invalid response while loading services."
+          );
+        }
+
+        if (
+          !response.ok ||
+          !data.success
+        ) {
+          throw new Error(
+            data?.error ||
+              "Unable to load services."
+          );
+        }
+
+        /*
+         * IMPORTANT:
+         *
+         * The API returns:
+         *
+         * {
+         *   product: "telegram",
+         *   priceUSD: 0.13,
+         *   quantity: 55032
+         * }
+         *
+         * NOT:
+         *
+         * {
+         *   name: "telegram"
+         * }
+         */
+        const incoming =
+          Array.isArray(
+            data.products
+          )
+            ? data.products
+            : [];
+
+        const productMap =
+          new Map<
+            string,
+            Product
+          >();
+
+        incoming.forEach(
+          (item: any) => {
+            const name =
+              String(
+                item?.product ||
+                  item?.name ||
+                  ""
+              ).trim();
+
+            if (!name) {
+              return;
+            }
+
+            if (
+              !productMap.has(
+                name
+              )
+            ) {
+              productMap.set(
+                name,
+                {
+                  name,
+
+                  category:
+                    item?.category ||
+                    item?.Category ||
+                    null,
+
+                  quantity:
+                    Number(
+                      item?.quantity ||
+                        item?.Qty ||
+                        0
+                    ),
+
+                  priceUSD:
+                    Number(
+                      item?.priceUSD ||
+                        item?.Price ||
+                        0
+                    ),
+
+                  basePriceNGN:
+                    Number(
+                      item?.basePriceNGN ||
+                        0
+                    ),
+
+                  profitNGN:
+                    Number(
+                      item?.profitNGN ||
+                        0
+                    ),
+
+                  priceNGN:
+                    Number(
+                      item?.priceNGN ||
+                        0
+                    ),
+                }
+              );
+            }
+          }
+        );
+
+        const unique =
+          Array.from(
+            productMap.values()
+          ).sort((a, b) =>
+            a.name.localeCompare(
+              b.name
+            )
+          );
+
+        setProducts(
+          unique
+        );
+
+        /*
+         * The API tells us which real
+         * operator was actually used.
+         *
+         * If the user didn't choose one,
+         * select that real operator in
+         * the dropdown.
+         */
+        if (
+          !operator &&
+          data.operator
+        ) {
+          setOperator(
+            String(
+              data.operator
+            )
+          );
+        }
+      } catch (err) {
+        setProducts([]);
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load services."
+        );
+      } finally {
+        setLoadingProducts(
+          false
+        );
+      }
+    }
+
+    loadServices();
+  }, [
+    country,
+    operator,
+  ]);
+
+  /*
+   * ========================================
+   * SEARCH NUMBERS
+   * ========================================
+   */
+  async function searchNumbers() {
+    if (!country) {
       setError(
-        "Please select a country and service first."
+        "Please select a country."
+      );
+      return;
+    }
+
+    if (!operator) {
+      setError(
+        "Please select an operator."
+      );
+      return;
+    }
+
+    if (!service) {
+      setError(
+        "Please select a service."
       );
       return;
     }
 
     try {
-      setBuyingOperator(
-        operator.operator
-      );
+      setSearching(true);
       setError("");
+      setMessage("");
+      setResults([]);
 
-      /*
-       * The buy route receives the exact
-       * operator selected by the customer.
-       */
-      const response = await fetch(
-        "/api/5sim/buy",
+      const url =
+        `/api/5sim?action=search` +
+        `&country=${encodeURIComponent(
+          country
+        )}` +
+        `&operator=${encodeURIComponent(
+          operator
+        )}` +
+        `&product=${encodeURIComponent(
+          service
+        )}`;
+
+      console.log(
+        "Searching 5SIM numbers:",
         {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            country,
-            product: service,
-            operator:
-              operator.operator,
-          }),
+          country,
+          operator,
+          product:
+            service,
+          url,
         }
       );
 
-      const data =
-        await response.json();
+      const response =
+        await fetch(
+          url,
+          {
+            cache:
+              "no-store",
+          }
+        );
 
-      if (!response.ok || !data.success) {
+      const text =
+        await response.text();
+
+      let data: any;
+
+      try {
+        data =
+          JSON.parse(
+            text
+          );
+      } catch {
         throw new Error(
-          data.error ||
-            "Unable to purchase number."
+          "The server returned an invalid response while searching."
+        );
+      }
+
+      if (
+        !response.ok ||
+        !data.success
+      ) {
+        throw new Error(
+          data?.error ||
+            "Unable to search for numbers."
         );
       }
 
       /*
-       * The number has been successfully
-       * provided by 5sim.
+       * The current API returns the
+       * selected product directly,
+       * not data.results[].
+       *
+       * Convert it into the format
+       * used by the result cards.
        */
-      alert(
-        `Number purchased successfully!\n\n${data.number}`
-      );
+      const found: SearchResult =
+        {
+          country:
+            String(
+              data.country ||
+                country
+            ),
+
+          operator:
+            String(
+              data.operator ||
+                operator
+            ),
+
+          service:
+            String(
+              data.product ||
+                service
+            ),
+
+          quantity:
+            Number(
+              data.quantity ||
+                0
+            ),
+
+          priceUSD:
+            Number(
+              data.priceUSD ||
+                0
+            ),
+
+          basePriceNGN:
+            Number(
+              data.basePriceNGN ||
+                0
+            ),
+
+          profitNGN:
+            Number(
+              data.profitNGN ||
+                0
+            ),
+
+          priceNGN:
+            Number(
+              data.priceNGN ||
+                0
+            ),
+
+          currency:
+            "NGN",
+        };
+
+      if (
+        found.quantity <=
+        0
+      ) {
+        setMessage(
+          "No available numbers were found for this selection."
+        );
+        return;
+      }
+
+      setResults([
+        found,
+      ]);
     } catch (err) {
-      console.error(
-        "BUY NUMBER ERROR:",
-        err
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to search for numbers."
+      );
+    } finally {
+      setSearching(
+        false
+      );
+    }
+  }
+
+  /*
+   * ========================================
+   * BUY NUMBER
+   * ========================================
+   */
+  async function buyNumber(
+    item: SearchResult
+  ) {
+    try {
+      setBuying(true);
+      setError("");
+      setMessage("");
+
+      const {
+        data: {
+          session,
+        },
+        error:
+          sessionError,
+      } =
+        await supabase.auth.getSession();
+
+      if (
+        sessionError ||
+        !session
+      ) {
+        setError(
+          "Please log in before purchasing a number."
+        );
+        return;
+      }
+
+      const url =
+        `/api/5sim?action=buy` +
+        `&country=${encodeURIComponent(
+          item.country
+        )}` +
+        `&operator=${encodeURIComponent(
+          item.operator
+        )}` +
+        `&product=${encodeURIComponent(
+          item.service
+        )}`;
+
+      console.log(
+        "Buying 5SIM number:",
+        {
+          country:
+            item.country,
+          operator:
+            item.operator,
+          product:
+            item.service,
+        }
       );
 
+      const response =
+        await fetch(
+          url,
+          {
+            method:
+              "GET",
+
+            cache:
+              "no-store",
+
+            headers: {
+              Authorization:
+                `Bearer ${session.access_token}`,
+            },
+          }
+        );
+
+      const text =
+        await response.text();
+
+      let data: any;
+
+      try {
+        data =
+          JSON.parse(
+            text
+          );
+      } catch {
+        throw new Error(
+          "The purchase server returned an invalid response."
+        );
+      }
+
+      if (
+        !response.ok ||
+        !data.success
+      ) {
+        throw new Error(
+          data?.error ||
+            "Unable to purchase number."
+        );
+      }
+
+      const activationData =
+        data.data ||
+        data;
+
+      try {
+        sessionStorage.setItem(
+          "moriki_activation",
+          JSON.stringify(
+            activationData
+          )
+        );
+      } catch {}
+
+      const orderId =
+        data.orderId ||
+        activationData.orderId ||
+        activationData.order_id;
+
+      if (orderId) {
+        router.push(
+          `/activation?id=${encodeURIComponent(
+            String(
+              orderId
+            )
+          )}`
+        );
+      } else {
+        router.push(
+          "/activation"
+        );
+      }
+    } catch (err) {
       setError(
         err instanceof Error
           ? err.message
           : "Unable to purchase number."
       );
     } finally {
-      setBuyingOperator("");
+      setBuying(false);
     }
   }
 
-  function formatPrice(
-    value: number
-  ) {
-    return `₦${Math.round(
-      Number(value) || 0
-    ).toLocaleString("en-NG")}`;
-  }
+  /*
+   * ========================================
+   * SELECTED PRODUCT
+   * ========================================
+   */
+  const selectedProduct =
+    products.find(
+      (item) =>
+        item.name ===
+        service
+    );
 
   return (
-    <main className="page">
-      <style>{`
+    <>
+      <style jsx global>{`
         * {
           box-sizing: border-box;
         }
@@ -275,137 +895,383 @@ export default function NumbersPage() {
         body {
           margin: 0;
           background: #020617;
+          color: white;
+          font-family:
+            Arial,
+            Helvetica,
+            sans-serif;
         }
 
-        .page {
+        button,
+        select {
+          font-family: inherit;
+        }
+
+        .moriki-page {
           min-height: 100vh;
-          color: white;
-          font-family: Arial, sans-serif;
           background:
             radial-gradient(
-              circle at top right,
-              rgba(33,150,243,.18),
-              transparent 35%
+              circle at 10% 10%,
+              rgba(14, 165, 233, 0.16),
+              transparent 32%
+            ),
+            radial-gradient(
+              circle at 90% 20%,
+              rgba(37, 99, 235, 0.18),
+              transparent 30%
             ),
             linear-gradient(
               135deg,
-              #020617,
-              #0f172a,
-              #020617
+              #020617 0%,
+              #07142f 50%,
+              #020617 100%
             );
         }
 
-        .header {
-          border-bottom: 1px solid
-            rgba(255,255,255,.08);
-          background:
-            rgba(2,6,23,.96);
-        }
-
-        .header-inner {
-          max-width: 1100px;
-          margin: auto;
-          padding: 20px;
+        .topbar {
+          height: 76px;
           display: flex;
           align-items: center;
           justify-content: space-between;
+          padding: 0 6%;
+          border-bottom: 1px solid
+            rgba(148, 163, 184, 0.14);
+          background: rgba(
+            2,
+            6,
+            23,
+            0.88
+          );
+          backdrop-filter: blur(16px);
+          position: sticky;
+          top: 0;
+          z-index: 20;
         }
 
-        .logo {
+        .brand {
           font-size: 25px;
-          font-weight: 800;
+          font-weight: 900;
+          letter-spacing: -1px;
         }
 
-        .logo span {
+        .brand-white {
+          color: white;
+        }
+
+        .brand-blue {
           color: #2196f3;
         }
 
         .nav {
           display: flex;
-          gap: 18px;
+          gap: 28px;
+          align-items: center;
         }
 
         .nav a {
           color: #94a3b8;
           text-decoration: none;
-          font-size: 14px;
+          font-weight: 700;
+          font-size: 15px;
         }
 
         .nav a:hover {
-          color: white;
+          color: #38bdf8;
         }
 
-        .container {
-          max-width: 1100px;
-          margin: auto;
-          padding: 45px 20px 70px;
+        .page-container {
+          width: min(1200px, 92%);
+          margin: 0 auto;
+          padding: 70px 0 100px;
         }
 
-        .label {
-          color: #2196f3;
-          font-size: 12px;
-          font-weight: 800;
-          letter-spacing: 1.5px;
+        .eyebrow {
+          color: #38bdf8;
+          font-size: 13px;
+          font-weight: 900;
+          letter-spacing: 3px;
+          text-transform: uppercase;
+          margin-bottom: 15px;
         }
 
-        h1 {
-          margin: 10px 0;
-          font-size: 42px;
-        }
-
-        .subtitle {
-          color: #94a3b8;
-          margin-bottom: 35px;
-        }
-
-        .selectors {
+        .hero {
           display: grid;
           grid-template-columns:
-            repeat(2, minmax(0, 1fr));
-          gap: 18px;
+            1.35fr 0.65fr;
+          gap: 45px;
+          align-items: center;
+          margin-bottom: 50px;
         }
 
-        .field {
-          padding: 20px;
-          border-radius: 16px;
-          background:
-            rgba(15,23,42,.96);
+        .hero h1 {
+          margin: 0;
+          font-size: clamp(
+            44px,
+            6vw,
+            72px
+          );
+          line-height: 0.98;
+          letter-spacing: -3px;
+        }
+
+        .hero h1 span {
+          color: #2196f3;
+        }
+
+        .hero p {
+          color: #94a3b8;
+          font-size: 18px;
+          line-height: 1.7;
+          max-width: 680px;
+          margin-top: 22px;
+        }
+
+        .visual {
+          min-height: 250px;
+          border-radius: 30px;
           border: 1px solid
-            rgba(255,255,255,.08);
+            rgba(
+              56,
+              189,
+              248,
+              0.25
+            );
+          background:
+            radial-gradient(
+              circle at 50% 40%,
+              rgba(
+                14,
+                165,
+                233,
+                0.3
+              ),
+              transparent 42%
+            ),
+            rgba(
+              15,
+              23,
+              42,
+              0.8
+            );
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .visual-phone {
+          width: 115px;
+          height: 190px;
+          border: 5px solid
+            #38bdf8;
+          border-radius: 25px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow:
+            0 0 60px
+              rgba(
+                14,
+                165,
+                233,
+                0.55
+              );
+          transform: rotate(-8deg);
+        }
+
+        .visual-phone-inner {
+          width: 65px;
+          height: 65px;
+          border-radius: 50%;
+          background: #2196f3;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 28px;
+        }
+
+        .search-card {
+          border-radius: 28px;
+          padding: 30px;
+          background: rgba(
+            15,
+            23,
+            42,
+            0.86
+          );
+          border: 1px solid
+            rgba(
+              148,
+              163,
+              184,
+              0.14
+            );
+          box-shadow:
+            0 25px 70px
+              rgba(
+                0,
+                0,
+                0,
+                0.3
+              );
+        }
+
+        .search-grid {
+          display: grid;
+          grid-template-columns:
+            1fr 1fr 1fr 160px;
+          gap: 18px;
+          align-items: end;
         }
 
         .field label {
           display: block;
+          color: #94a3b8;
+          font-size: 12px;
+          font-weight: 900;
+          letter-spacing: 1px;
           margin-bottom: 9px;
-          color: #cbd5e1;
-          font-size: 13px;
-          font-weight: 700;
+          text-transform: uppercase;
         }
 
-        select {
+        .field select {
           width: 100%;
-          padding: 14px;
-          border-radius: 10px;
-          border: 1px solid #334155;
+          height: 54px;
+          border-radius: 14px;
+          border: 1px solid
+            #334155;
           background: #020617;
           color: white;
+          padding: 0 15px;
           font-size: 15px;
           outline: none;
+          cursor: pointer;
         }
 
-        select:focus {
+        .field select:focus {
           border-color: #2196f3;
+          box-shadow:
+            0 0 0 3px
+              rgba(
+                33,
+                150,
+                243,
+                0.12
+              );
+        }
+
+        .field select:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
+        }
+
+        .search-button {
+          height: 54px;
+          width: 100%;
+          border: 0;
+          border-radius: 14px;
+          color: white;
+          background:
+            linear-gradient(
+              135deg,
+              #0ea5e9,
+              #2563eb
+            );
+          font-size: 15px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .search-button:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .alert {
+          margin-top: 22px;
+          border-radius: 16px;
+          padding: 16px 20px;
+          font-weight: 600;
         }
 
         .error {
-          margin-top: 20px;
-          padding: 15px;
-          border-radius: 10px;
-          background:
-            rgba(127,29,29,.30);
+          background: rgba(
+            127,
+            29,
+            29,
+            0.28
+          );
           border: 1px solid
-            rgba(248,113,113,.30);
+            rgba(
+              248,
+              113,
+              113,
+              0.3
+            );
           color: #fecaca;
+        }
+
+        .success {
+          background: rgba(
+            6,
+            78,
+            59,
+            0.28
+          );
+          border: 1px solid
+            rgba(
+              52,
+              211,
+              153,
+              0.3
+            );
+          color: #a7f3d0;
+        }
+
+        .service-card {
+          margin-top: 25px;
+          border-radius: 24px;
+          padding: 25px;
+          background: rgba(
+            15,
+            23,
+            42,
+            0.75
+          );
+          border: 1px solid
+            rgba(
+              148,
+              163,
+              184,
+              0.12
+            );
+        }
+
+        .service-grid {
+          display: grid;
+          grid-template-columns:
+            1fr 1fr 1fr;
+          gap: 20px;
+        }
+
+        .service-label {
+          color: #64748b;
+          font-size: 12px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+        }
+
+        .service-value {
+          margin-top: 6px;
+          font-size: 20px;
+          font-weight: 900;
+        }
+
+        .price {
+          color: #38bdf8;
+          font-size: 25px;
         }
 
         .results {
@@ -413,304 +1279,623 @@ export default function NumbersPage() {
         }
 
         .results-title {
-          margin-bottom: 15px;
-          font-size: 20px;
-          font-weight: 800;
-        }
-
-        .operators {
-          display: grid;
-          grid-template-columns:
-            repeat(3, minmax(0, 1fr));
-          gap: 16px;
-        }
-
-        .operator {
-          padding: 20px;
-          border-radius: 16px;
-          background:
-            rgba(15,23,42,.96);
-          border: 1px solid
-            rgba(255,255,255,.08);
-          transition:
-            transform .15s ease,
-            border-color .15s ease;
-        }
-
-        .operator:hover {
-          transform: translateY(-2px);
-          border-color:
-            rgba(33,150,243,.55);
-        }
-
-        .operator-name {
-          font-size: 18px;
-          font-weight: 800;
-        }
-
-        .stock {
-          margin-top: 7px;
-          color: #94a3b8;
-          font-size: 13px;
-        }
-
-        .price {
-          margin-top: 20px;
-          font-size: 27px;
+          font-size: 24px;
           font-weight: 900;
+          margin-bottom: 18px;
         }
 
-        .buy {
-          width: 100%;
-          margin-top: 16px;
-          padding: 13px;
-          border: none;
-          border-radius: 10px;
+        .result-card {
+          border-radius: 25px;
+          padding: 26px;
+          margin-bottom: 15px;
           background:
             linear-gradient(
               135deg,
-              #1976d2,
-              #2196f3
+              rgba(
+                15,
+                23,
+                42,
+                0.95
+              ),
+              rgba(
+                15,
+                23,
+                42,
+                0.7
+              )
+            );
+          border: 1px solid
+            rgba(
+              56,
+              189,
+              248,
+              0.12
+            );
+        }
+
+        .result-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 30px;
+        }
+
+        .available {
+          color: #38bdf8;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 2px;
+          text-transform: uppercase;
+        }
+
+        .result-name {
+          font-size: 24px;
+          font-weight: 900;
+          margin-top: 8px;
+        }
+
+        .badges {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 13px;
+        }
+
+        .badge {
+          padding: 7px 11px;
+          border-radius: 999px;
+          background: #1e293b;
+          color: #cbd5e1;
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        .result-right {
+          display: flex;
+          align-items: center;
+          gap: 25px;
+        }
+
+        .customer-label {
+          color: #64748b;
+          font-size: 11px;
+          text-transform: uppercase;
+          font-weight: 800;
+        }
+
+        .customer-price {
+          color: #38bdf8;
+          font-size: 29px;
+          font-weight: 900;
+          margin-top: 4px;
+        }
+
+        .buy-button {
+          border: 0;
+          border-radius: 14px;
+          padding: 15px 24px;
+          background:
+            linear-gradient(
+              135deg,
+              #0ea5e9,
+              #2563eb
             );
           color: white;
-          font-weight: 800;
+          font-size: 14px;
+          font-weight: 900;
           cursor: pointer;
         }
 
-        .buy:hover {
-          opacity: .92;
-        }
-
-        .buy:disabled {
-          opacity: .55;
+        .buy-button:disabled {
+          opacity: 0.5;
           cursor: not-allowed;
         }
 
-        .loading {
-          margin-top: 25px;
-          padding: 30px;
-          text-align: center;
-          color: #94a3b8;
-        }
-
         .empty {
-          margin-top: 25px;
-          padding: 35px;
+          margin-top: 30px;
+          min-height: 260px;
+          border-radius: 25px;
+          border: 1px solid
+            rgba(
+              148,
+              163,
+              184,
+              0.12
+            );
+          background: rgba(
+            15,
+            23,
+            42,
+            0.55
+          );
+          display: flex;
+          align-items: center;
+          justify-content: center;
           text-align: center;
-          border-radius: 16px;
-          background:
-            rgba(15,23,42,.96);
-          color: #94a3b8;
+          padding: 35px;
         }
 
-        @media (max-width: 800px) {
-          .operators {
+        .empty-icon {
+          width: 70px;
+          height: 70px;
+          border-radius: 22px;
+          margin: 0 auto 18px;
+          background:
+            linear-gradient(
+              135deg,
+              #0ea5e9,
+              #2563eb
+            );
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 30px;
+        }
+
+        .empty-title {
+          font-size: 22px;
+          font-weight: 900;
+        }
+
+        .empty-text {
+          color: #64748b;
+          margin-top: 8px;
+          line-height: 1.6;
+        }
+
+        @media (max-width: 900px) {
+          .hero {
+            grid-template-columns: 1fr;
+          }
+
+          .visual {
+            display: none;
+          }
+
+          .search-grid {
             grid-template-columns:
-              repeat(2, minmax(0, 1fr));
+              1fr 1fr;
+          }
+
+          .service-grid {
+            grid-template-columns:
+              1fr 1fr;
+          }
+
+          .result-row {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+
+          .result-right {
+            width: 100%;
+            justify-content: space-between;
           }
         }
 
         @media (max-width: 600px) {
-          .selectors {
+          .topbar {
+            padding: 0 5%;
+          }
+
+          .nav {
+            gap: 12px;
+          }
+
+          .nav a {
+            font-size: 12px;
+          }
+
+          .page-container {
+            padding-top: 45px;
+          }
+
+          .hero h1 {
+            font-size: 48px;
+          }
+
+          .search-grid {
             grid-template-columns: 1fr;
           }
 
-          .operators {
+          .service-grid {
             grid-template-columns: 1fr;
           }
 
-          h1 {
-            font-size: 34px;
+          .result-right {
+            flex-direction: column;
+            align-items: flex-start;
           }
 
-          .container {
-            padding:
-              30px 15px 50px;
+          .buy-button {
+            width: 100%;
           }
         }
       `}</style>
 
-      <header className="header">
-        <div className="header-inner">
-          <div className="logo">
-            Moriki <span>SMS</span>
+      <div className="moriki-page">
+        <header className="topbar">
+          <div className="brand">
+            <span className="brand-white">
+              Moriki
+            </span>{" "}
+            <span className="brand-blue">
+              SMS
+            </span>
           </div>
 
           <nav className="nav">
-            <a href="/">Home</a>
-            <a href="/wallet">Wallet</a>
+            <a href="/dashboard">
+              Dashboard
+            </a>
+
+            <a href="/orders">
+              Orders
+            </a>
+
+            <a href="/wallet">
+              Wallet
+            </a>
           </nav>
-        </div>
-      </header>
+        </header>
 
-      <div className="container">
-        <div className="label">
-          LIVE INVENTORY
-        </div>
+        <div className="page-container">
+          <section className="hero">
+            <div>
+              <div className="eyebrow">
+                Live Number Marketplace
+              </div>
 
-        <h1>Buy a Number</h1>
+              <h1>
+                Browse{" "}
+                <span>
+                  Numbers.
+                </span>
+              </h1>
 
-        <p className="subtitle">
-          Choose a country, service, and
-          operator. Prices and availability
-          come from our live provider inventory.
-        </p>
+              <p>
+                Find available virtual
+                numbers from our live
+                catalogue. Select your
+                country, operator and
+                service to see current
+                availability and Moriki
+                pricing.
+              </p>
+            </div>
 
-        <section className="selectors">
-          <div className="field">
-            <label htmlFor="country">
-              Country
-            </label>
+            <div className="visual">
+              <div className="visual-phone">
+                <div className="visual-phone-inner">
+                  ☎
+                </div>
+              </div>
+            </div>
+          </section>
 
-            <select
-              id="country"
-              value={country}
-              onChange={(e) =>
-                handleCountryChange(
-                  e.target.value
-                )
-              }
-              disabled={loadingCountries}
-            >
-              <option value="">
-                {loadingCountries
-                  ? "Loading countries..."
-                  : "Select country"}
-              </option>
+          <section className="search-card">
+            <div className="search-grid">
+              <div className="field">
+                <label>
+                  Country
+                </label>
 
-              {countries.map(
-                (item) => (
-                  <option
-                    key={item.code}
-                    value={item.code}
-                  >
-                    {item.name}
+                <select
+                  value={country}
+                  onChange={(e) =>
+                    setCountry(
+                      e.target.value
+                    )
+                  }
+                  disabled={
+                    loadingCountries
+                  }
+                >
+                  <option value="">
+                    {loadingCountries
+                      ? "Loading countries..."
+                      : "Select country"}
                   </option>
-                )
-              )}
-            </select>
-          </div>
 
-          <div className="field">
-            <label htmlFor="service">
-              Service
-            </label>
+                  {countries.map(
+                    (item) => (
+                      <option
+                        key={
+                          item.key
+                        }
+                        value={
+                          item.key
+                        }
+                      >
+                        {item.name}
+                      </option>
+                    )
+                  )}
+                </select>
+              </div>
 
-            <select
-              id="service"
-              value={service}
-              onChange={(e) =>
-                handleServiceChange(
-                  e.target.value
-                )
-              }
-              disabled={
-                !country ||
-                loadingServices
-              }
-            >
-              <option value="">
-                {!country
-                  ? "Select country first"
-                  : loadingServices
-                  ? "Loading services..."
-                  : "Select service"}
-              </option>
+              <div className="field">
+                <label>
+                  Operator
+                </label>
 
-              {services.map(
-                (item) => (
-                  <option
-                    key={item}
-                    value={item}
-                  >
-                    {item}
+                <select
+                  value={operator}
+                  onChange={(e) =>
+                    setOperator(
+                      e.target.value
+                    )
+                  }
+                  disabled={
+                    !country ||
+                    operators.length ===
+                      0
+                  }
+                >
+                  <option value="">
+                    {!country
+                      ? "Select country first"
+                      : operators.length ===
+                        0
+                      ? "No operators available"
+                      : "Select operator"}
                   </option>
-                )
-              )}
-            </select>
-          </div>
-        </section>
 
-        {error && (
-          <div className="error">
-            {error}
-          </div>
-        )}
+                  {operators.map(
+                    (item) => (
+                      <option
+                        key={item}
+                        value={item}
+                      >
+                        {pretty(
+                          item
+                        )}
+                      </option>
+                    )
+                  )}
+                </select>
+              </div>
 
-        {loadingOperators && (
-          <div className="loading">
-            Loading available operators...
-          </div>
-        )}
+              <div className="field">
+                <label>
+                  Service
+                </label>
 
-        {!loadingOperators &&
-          service &&
-          operators.length === 0 && (
-            <div className="empty">
-              No available operators found
-              for this country and service.
+                <select
+                  value={service}
+                  onChange={(e) =>
+                    setService(
+                      e.target.value
+                    )
+                  }
+                  disabled={
+                    !country ||
+                    !operator ||
+                    loadingProducts ||
+                    products.length ===
+                      0
+                  }
+                >
+                  <option value="">
+                    {!country
+                      ? "Select country first"
+                      : !operator
+                      ? "Select operator first"
+                      : loadingProducts
+                      ? "Loading services..."
+                      : products.length ===
+                        0
+                      ? "No services available"
+                      : "Select service"}
+                  </option>
+
+                  {products.map(
+                    (item) => (
+                      <option
+                        key={
+                          item.name
+                        }
+                        value={
+                          item.name
+                        }
+                      >
+                        {pretty(
+                          item.name
+                        )}
+                      </option>
+                    )
+                  )}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                className="search-button"
+                onClick={
+                  searchNumbers
+                }
+                disabled={
+                  searching ||
+                  !country ||
+                  !operator ||
+                  !service
+                }
+              >
+                {searching
+                  ? "Searching..."
+                  : "Search Numbers"}
+              </button>
+            </div>
+          </section>
+
+          {error && (
+            <div className="alert error">
+              {error}
             </div>
           )}
 
-        {!loadingOperators &&
-          operators.length > 0 && (
-            <section className="results">
-              <div className="results-title">
-                Available Operators
+          {message &&
+            !error && (
+              <div className="alert success">
+                {message}
               </div>
+            )}
 
-              <div className="operators">
-                {operators.map(
-                  (operator) => (
-                    <article
-                      className="operator"
-                      key={
-                        operator.operator
-                      }
-                    >
-                      <div className="operator-name">
-                        {
-                          operator.operatorName
-                        }
-                      </div>
+          {selectedProduct && (
+            <section className="service-card">
+              <div className="service-grid">
+                <div>
+                  <div className="service-label">
+                    Service
+                  </div>
 
-                      <div className="stock">
-                        {
-                          operator.stock
-                        }{" "}
-                        numbers available
-                      </div>
+                  <div className="service-value">
+                    {pretty(
+                      selectedProduct.name
+                    )}
+                  </div>
+                </div>
 
-                      <div className="price">
-                        {formatPrice(
-                          operator.customerPrice
-                        )}
-                      </div>
+                <div>
+                  <div className="service-label">
+                    Available
+                  </div>
 
-                      <button
-                        className="buy"
-                        onClick={() =>
-                          buyNumber(
-                            operator
-                          )
-                        }
-                        disabled={
-                          buyingOperator ===
-                          operator.operator
-                        }
-                      >
-                        {buyingOperator ===
-                        operator.operator
-                          ? "Processing..."
-                          : "Buy Number"}
-                      </button>
-                    </article>
-                  )
-                )}
+                  <div className="service-value">
+                    {selectedProduct.quantity.toLocaleString()}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="service-label">
+                    Moriki Price
+                  </div>
+
+                  <div className="service-value price">
+                    {naira(
+                      selectedProduct.priceNGN
+                    )}
+                  </div>
+                </div>
               </div>
             </section>
           )}
+
+          {results.length > 0 ? (
+            <section className="results">
+              <div className="results-title">
+                Available Numbers
+              </div>
+
+              {results.map(
+                (
+                  item,
+                  index
+                ) => (
+                  <div
+                    className="result-card"
+                    key={`${item.country}-${item.operator}-${item.service}-${index}`}
+                  >
+                    <div className="result-row">
+                      <div>
+                        <div className="available">
+                          ● Available
+                        </div>
+
+                        <div className="result-name">
+                          {pretty(
+                            item.service
+                          )}
+                        </div>
+
+                        <div className="badges">
+                          <span className="badge">
+                            🌍{" "}
+                            {pretty(
+                              item.country
+                            )}
+                          </span>
+
+                          <span className="badge">
+                            📡{" "}
+                            {pretty(
+                              item.operator
+                            )}
+                          </span>
+
+                          <span className="badge">
+                            {Number(
+                              item.quantity ||
+                                0
+                            ).toLocaleString()}{" "}
+                            available
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="result-right">
+                        <div>
+                          <div className="customer-label">
+                            Customer
+                            Price
+                          </div>
+
+                          <div className="customer-price">
+                            {naira(
+                              item.priceNGN
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="buy-button"
+                          disabled={
+                            buying
+                          }
+                          onClick={() =>
+                            buyNumber(
+                              item
+                            )
+                          }
+                        >
+                          {buying
+                            ? "Processing..."
+                            : "Buy Number"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              )}
+            </section>
+          ) : (
+            <section className="empty">
+              <div>
+                <div className="empty-icon">
+                  📱
+                </div>
+
+                <div className="empty-title">
+                  Find a Number
+                </div>
+
+                <div className="empty-text">
+                  Select a country,
+                  operator and
+                  service above,
+                  then press{" "}
+                  <strong>
+                    Search Numbers
+                  </strong>{" "}
+                  to check live
+                  availability.
+                </div>
+              </div>
+            </section>
+          )}
+        </div>
       </div>
-    </main>
+    </>
   );
 }

@@ -1,8 +1,94 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { supabase } from "../../lib/supabase";
 
 export default function DashboardPage() {
+  const router = useRouter();
+
+  const [balance, setBalance] = useState(0);
+  const [loadingBalance, setLoadingBalance] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  useEffect(() => {
+    async function loadBalance() {
+      try {
+        setLoadingBalance(true);
+
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!user) {
+          setBalance(0);
+          return;
+        }
+
+        const { data: wallet, error } = await supabase
+          .from("wallets")
+          .select("balance")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (error) {
+          console.error(
+            "DASHBOARD WALLET ERROR:",
+            error
+          );
+          setBalance(0);
+          return;
+        }
+
+        setBalance(
+          Number(wallet?.balance ?? 0)
+        );
+      } catch (error) {
+        console.error(
+          "DASHBOARD BALANCE ERROR:",
+          error
+        );
+        setBalance(0);
+      } finally {
+        setLoadingBalance(false);
+      }
+    }
+
+    loadBalance();
+  }, []);
+
+  async function handleLogout() {
+    if (loggingOut) return;
+
+    setLoggingOut(true);
+
+    const { error } =
+      await supabase.auth.signOut();
+
+    if (error) {
+      console.error(
+        "LOGOUT ERROR:",
+        error
+      );
+
+      setLoggingOut(false);
+      return;
+    }
+
+    router.replace("/login");
+  }
+
+  function formatMoney(amount: number) {
+    return `₦${Number(amount || 0).toLocaleString(
+      "en-NG",
+      {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }
+    )}`;
+  }
+
   return (
     <main className="dashboard">
       <style>{`
@@ -51,6 +137,7 @@ export default function DashboardPage() {
           display: flex;
           align-items: center;
           justify-content: space-between;
+          gap: 15px;
         }
 
         .logo {
@@ -58,10 +145,17 @@ export default function DashboardPage() {
           text-decoration: none;
           font-size: 24px;
           font-weight: 900;
+          flex-shrink: 0;
         }
 
         .logo span {
           color: #2196f3;
+        }
+
+        .headerActions {
+          display: flex;
+          align-items: center;
+          gap: 10px;
         }
 
         .home {
@@ -69,10 +163,37 @@ export default function DashboardPage() {
           text-decoration: none;
           font-size: 14px;
           font-weight: 700;
+          padding: 10px 12px;
         }
 
         .home:hover {
           color: #ffffff;
+        }
+
+        .logoutButton {
+          border: 1px solid rgba(248,113,113,0.25);
+          background: rgba(248,113,113,0.08);
+          color: #f87171;
+          border-radius: 10px;
+          padding: 10px 14px;
+          font-size: 13px;
+          font-weight: 800;
+          cursor: pointer;
+          transition:
+            background 0.2s ease,
+            border-color 0.2s ease,
+            color 0.2s ease;
+        }
+
+        .logoutButton:hover {
+          background: rgba(248,113,113,0.15);
+          border-color: rgba(248,113,113,0.4);
+          color: #fca5a5;
+        }
+
+        .logoutButton:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
         }
 
         .container {
@@ -162,8 +283,9 @@ export default function DashboardPage() {
           color: white;
           text-decoration: none;
           overflow: hidden;
-          transition: transform 0.2s ease,
-                      border-color 0.2s ease;
+          transition:
+            transform 0.2s ease,
+            border-color 0.2s ease;
         }
 
         .card:hover {
@@ -260,6 +382,28 @@ export default function DashboardPage() {
         }
 
         @media (max-width: 700px) {
+          .topbarInner {
+            padding: 15px;
+          }
+
+          .logo {
+            font-size: 21px;
+          }
+
+          .headerActions {
+            gap: 5px;
+          }
+
+          .home {
+            padding: 8px;
+            font-size: 13px;
+          }
+
+          .logoutButton {
+            padding: 9px 11px;
+            font-size: 12px;
+          }
+
           .container {
             padding: 32px 15px 60px;
           }
@@ -295,9 +439,25 @@ export default function DashboardPage() {
             Moriki <span>SMS</span>
           </Link>
 
-          <Link href="/" className="home">
-            Home
-          </Link>
+          <div className="headerActions">
+            <Link
+              href="/"
+              className="home"
+            >
+              Home
+            </Link>
+
+            <button
+              type="button"
+              className="logoutButton"
+              onClick={handleLogout}
+              disabled={loggingOut}
+            >
+              {loggingOut
+                ? "Logging out..."
+                : "Logout"}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -324,7 +484,9 @@ export default function DashboardPage() {
             </div>
 
             <div className="balanceAmount">
-              ₦0.00
+              {loadingBalance
+                ? "Loading..."
+                : formatMoney(balance)}
             </div>
           </div>
 

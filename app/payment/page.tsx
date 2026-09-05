@@ -1,7 +1,7 @@
 "use client";
 
+import { Suspense, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useState } from "react";
 import { supabase } from "../../lib/supabase";
 
 const countryNames: Record<string, string> = {
@@ -35,7 +35,7 @@ const prices: Record<string, number> = {
   Email: 800,
 };
 
-export default function PaymentPage() {
+function PaymentContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -120,7 +120,8 @@ export default function PaymentPage() {
 
       if (!response.ok) {
         throw new Error(
-          data.error || "Payment initialization failed"
+          data.error ||
+            "Payment initialization failed"
         );
       }
 
@@ -301,5 +302,33 @@ export default function PaymentPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+function PaymentLoading() {
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "#020617",
+        color: "#ffffff",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
+      <p style={{ color: "#94a3b8" }}>
+        Loading payment...
+      </p>
+    </main>
+  );
+}
+
+export default function PaymentPage() {
+  return (
+    <Suspense fallback={<PaymentLoading />}>
+      <PaymentContent />
+    </Suspense>
   );
 }

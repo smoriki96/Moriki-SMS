@@ -1,0 +1,189 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "../../lib/supabase";
+
+export default function ResetPasswordPage() {
+  const router = useRouter();
+
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState<"error" | "success">("error");
+  const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    async function checkSession() {
+      const { data } = await supabase.auth.getSession();
+
+      if (!data.session) {
+        setMessage(
+          "This password reset link is invalid or has expired. Please request a new one."
+        );
+        setMessageType("error");
+      }
+
+      setCheckingSession(false);
+    }
+
+    checkSession();
+  }, []);
+
+  async function handleUpdatePassword(
+    e: React.FormEvent<HTMLFormElement>
+  ) {
+    e.preventDefault();
+
+    setMessage("");
+    setMessageType("error");
+
+    if (!password) {
+      setMessage("Please enter a new password.");
+      return;
+    }
+
+    if (password.length < 6) {
+      setMessage("Password must be at least 6 characters.");
+      return;
+    }
+
+    if (!confirmPassword) {
+      setMessage("Please confirm your new password.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setMessage("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+
+    const { error } = await supabase.auth.updateUser({
+      password,
+    });
+
+    setLoading(false);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    setMessageType("success");
+    setMessage(
+      "Password updated successfully. Redirecting to login..."
+    );
+
+    await supabase.auth.signOut();
+
+    setTimeout(() => {
+      router.replace("/login");
+    }, 1500);
+  }
+
+  if (checkingSession) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-6">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-700 border-t-white" />
+          <p className="text-slate-400">Checking reset link...</p>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-6">
+      <div className="w-full max-w-md">
+        <div className="mb-8 text-center">
+          <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-xl font-black text-slate-950 shadow-lg">
+            M
+          </div>
+
+          <h1 className="text-3xl font-bold tracking-tight">
+            Reset password
+          </h1>
+
+          <p className="mt-2 text-sm text-slate-400">
+            Create a new password for your Moriki SMS account.
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
+          {message && (
+            <div
+              className={`mb-5 rounded-xl border px-4 py-3 text-sm ${
+                messageType === "success"
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                  : "border-red-500/30 bg-red-500/10 text-red-300"
+              }`}
+            >
+              {message}
+            </div>
+          )}
+
+          <form onSubmit={handleUpdatePassword} className="space-y-5">
+            <div>
+              <label
+                htmlFor="password"
+                className="mb-2 block text-sm font-medium text-slate-200"
+              >
+                New password
+              </label>
+
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter new password"
+                autoComplete="new-password"
+                disabled={loading}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-white disabled:opacity-60"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="confirmPassword"
+                className="mb-2 block text-sm font-medium text-slate-200"
+              >
+                Confirm new password
+              </label>
+
+              <input
+                id="confirmPassword"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm new password"
+                autoComplete="new-password"
+                disabled={loading}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-white disabled:opacity-60"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-xl bg-white px-4 py-3 font-semibold text-slate-950 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loading ? "Updating password..." : "Update password"}
+            </button>
+          </form>
+
+          <button
+            type="button"
+            onClick={() => router.push("/login")}
+            className="mt-5 w-full text-sm text-slate-400 transition hover:text-white"
+          >
+            ← Back to login
+          </button>
+        </div>
+      </div>
+    </main>
+  );
+}

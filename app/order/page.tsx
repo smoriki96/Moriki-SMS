@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 
 const countryNames: Record<string, string> = {
@@ -25,7 +26,7 @@ const countryNames: Record<string, string> = {
   GH: "🇬🇭 Ghana",
 };
 
-export default function OrderPage() {
+function OrderContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -256,5 +257,33 @@ export default function OrderPage() {
         </button>
       </section>
     </main>
+  );
+}
+
+function OrderLoading() {
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "#020617",
+        color: "#ffffff",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
+      <p style={{ color: "#94a3b8" }}>
+        Loading order...
+      </p>
+    </main>
+  );
+}
+
+export default function OrderPage() {
+  return (
+    <Suspense fallback={<OrderLoading />}>
+      <OrderContent />
+    </Suspense>
   );
 }

@@ -1,178 +1,290 @@
+import { NextResponse } from "next/server";
 
-import { NextRequest, NextResponse } from "next/server";
+const FIVE_SIM_API = "https://5sim.net/v1";
 
-const FIVE_SIM_API_KEY =
-  process.env.FIVESIM_API_KEY;
+function getApiKey() {
+  return process.env.FIVESIM_API_KEY;
+}
 
-const FIVE_SIM_BASE_URL =
-  "https://5sim.net/v1";
-
-export async function POST(
-  request: NextRequest
-) {
+export async function GET(request: Request) {
   try {
-    if (!FIVE_SIM_API_KEY) {
+    const apiKey = getApiKey();
+
+    if (!apiKey) {
       return NextResponse.json(
         {
           success: false,
-          error:
-            "5sim API key is not configured.",
+          error: "FIVESIM_API_KEY is missing from .env.local",
         },
         { status: 500 }
       );
     }
 
-    const body = await request.json();
+    const { searchParams } = new URL(request.url);
 
-    const country = String(
-      body.country || ""
-    ).trim();
-
-    const operator = String(
-      body.operator || "any"
-    ).trim();
-
-    const product = String(
-      body.product || ""
-    ).trim();
-
-    if (!country || !product) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Country and service are required.",
-        },
-        { status: 400 }
-      );
-    }
+    const action = searchParams.get("action");
+    const country = searchParams.get("country");
+    const operator =
+      searchParams.get("operator") || "any";
+    const product = searchParams.get("product");
 
     /*
-     * 5sim order endpoint
+     * ==============================
+     * 5SIM PRODUCTS / AVAILABILITY
+     * ==============================
+     *
+     * Returns live products, prices and
+     * available quantity for a country/operator.
      */
-    const url =
-      `${FIVE_SIM_BASE_URL}/user/buy/activation/` +
-      `${encodeURIComponent(country)}/` +
-      `${encodeURIComponent(operator)}/` +
-      `${encodeURIComponent(product)}`;
-
-    console.log(
-      "5sim BUY REQUEST:",
-      url
-    );
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        Authorization:
-          `Bearer ${FIVE_SIM_API_KEY}`,
-        Accept: "application/json",
-      },
-      cache: "no-store",
-    });
-
-    const text = await response.text();
-
-    let data: any = null;
-
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = null;
-    }
-
-    console.log(
-      "5sim BUY STATUS:",
-      response.status
-    );
-
-    console.log(
-      "5sim BUY RESPONSE:",
-      data || text
-    );
-
-    if (!response.ok) {
-      let message =
-        "5sim could not provide the number.";
-
-      if (
-        data &&
-        typeof data.message === "string"
-      ) {
-        message = data.message;
-      } else if (
-        data &&
-        typeof data.error === "string"
-      ) {
-        message = data.error;
-      } else if (text) {
-        message = text;
+    if (action === "prices") {
+      if (!country) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Country is required.",
+          },
+          { status: 400 }
+        );
       }
 
-      return NextResponse.json(
-        {
-          success: false,
-          error: message,
-          status: response.status,
-        },
-        {
-          status: response.status,
-        }
-      );
-    }
+      const url =
+        `${FIVE_SIM_API}/guest/products/` +
+        `${encodeURIComponent(country)}/` +
+        `${encodeURIComponent(operator)}`;
 
-    if (!data) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "5sim returned an invalid response.",
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
         },
-        { status: 502 }
-      );
+        cache: "no-store",
+      });
+
+      const text = await response.text();
+
+      let data: unknown;
+
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = text;
+      }
+
+      if (!response.ok) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              typeof data === "string"
+                ? data
+                : "5SIM products request failed.",
+            data,
+          },
+          { status: response.status }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        data,
+      });
     }
 
     /*
-     * 5sim normally returns:
-     * id
-     * phone
-     * product
-     * operator
-     * status
-     * price
-     * sms
+     * ==============================
+     * 5SIM ACCOUNT BALANCE
+     * ==============================
      */
-    if (!data.phone) {
-      return NextResponse.json(
+    if (action === "profile") {
+      const response = await fetch(
+        `${FIVE_SIM_API}/user/profile`,
         {
-          success: false,
-          error:
-            "5sim accepted the request but did not return a phone number.",
-          data,
-        },
-        { status: 502 }
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            Accept: "application/json",
+          },
+          cache: "no-store",
+        }
       );
+
+      const text = await response.text();
+
+      let data: unknown;
+
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = text;
+      }
+
+      if (!response.ok) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              typeof data === "string"
+                ? data
+                : "Unable to read 5SIM profile.",
+            data,
+          },
+          { status: response.status }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        data,
+      });
     }
 
-    return NextResponse.json({
-      success: true,
-      id: data.id,
-      number: data.phone,
-      phone: data.phone,
-      product:
-        data.product || product,
-      operator:
-        data.operator || operator,
-      providerPrice:
-        Number(data.price) || 0,
-      status:
-        data.status || "PENDING",
-    });
-  } catch (error) {
-    console.error(
-      "5sim BUY ERROR:",
-      error
+    /*
+     * ==============================
+     * BUY ACTIVATION
+     * ==============================
+     */
+    if (action === "buy") {
+      if (!country) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Country is required.",
+          },
+          { status: 400 }
+        );
+      }
+
+      if (!product) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Product/service is required.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const url =
+        `${FIVE_SIM_API}/user/buy/activation/` +
+        `${encodeURIComponent(country)}/` +
+        `${encodeURIComponent(operator)}/` +
+        `${encodeURIComponent(product)}`;
+
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+        },
+        cache: "no-store",
+      });
+
+      const text = await response.text();
+
+      let data: any;
+
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = null;
+      }
+
+      if (!response.ok) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              data?.message ||
+              data?.error ||
+              text ||
+              "5SIM purchase failed.",
+            data,
+          },
+          { status: response.status }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        data,
+      });
+    }
+
+    /*
+     * ==============================
+     * CHECK ACTIVATION
+     * ==============================
+     */
+    if (action === "status") {
+      const id = searchParams.get("id");
+
+      if (!id) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Activation ID is required.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const response = await fetch(
+        `${FIVE_SIM_API}/user/check/${encodeURIComponent(id)}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            Accept: "application/json",
+          },
+          cache: "no-store",
+        }
+      );
+
+      const text = await response.text();
+
+      let data: unknown;
+
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = text;
+      }
+
+      if (!response.ok) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              typeof data === "string"
+                ? data
+                : "Unable to check activation.",
+            data,
+          },
+          { status: response.status }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        data,
+      });
+    }
+
+    /*
+     * ==============================
+     * INVALID ACTION
+     * ==============================
+     */
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "Invalid action. Use prices, profile, buy, or status.",
+      },
+      { status: 400 }
     );
+  } catch (error) {
+    console.error("5SIM ROUTE ERROR:", error);
 
     return NextResponse.json(
       {
@@ -180,7 +292,7 @@ export async function POST(
         error:
           error instanceof Error
             ? error.message
-            : "Unable to purchase number from 5sim.",
+            : "Unable to connect to 5SIM.",
       },
       { status: 500 }
     );

@@ -10,16 +10,25 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState<
+    "error" | "success"
+  >("error");
+
   const [loading, setLoading] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
 
   async function handleLogin(
     e: React.FormEvent<HTMLFormElement>
   ) {
     e.preventDefault();
+    e.stopPropagation();
 
     setMessage("");
+    setMessageType("error");
 
-    if (!email.trim()) {
+    const cleanEmail = email.trim();
+
+    if (!cleanEmail) {
       setMessage("Please enter your email address.");
       return;
     }
@@ -31,19 +40,91 @@ export default function LoginPage() {
 
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    try {
+      const { data, error } =
+        await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        });
 
-    setLoading(false);
+      if (error) {
+        console.error("LOGIN ERROR:", error);
+        setMessage(error.message);
+        return;
+      }
 
-    if (error) {
-      setMessage(error.message);
+      if (!data.user || !data.session) {
+        setMessage("Login failed. Please try again.");
+        return;
+      }
+
+      // Never put credentials in the URL.
+      // Navigate only after Supabase authentication succeeds.
+      router.replace("/admin/dashboard");
+    } catch (error) {
+      console.error("LOGIN ERROR:", error);
+
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while logging in."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleForgotPassword() {
+    setMessage("");
+    setMessageType("error");
+
+    const cleanEmail = email.trim();
+
+    if (!cleanEmail) {
+      setMessage(
+        "Enter your email address first, then click Forgot password."
+      );
       return;
     }
 
-    router.push("/dashboard");
+    setForgotLoading(true);
+
+    try {
+      const redirectTo =
+        `${window.location.origin}/reset-password`;
+
+      const { error } =
+        await supabase.auth.resetPasswordForEmail(
+          cleanEmail,
+          {
+            redirectTo,
+          }
+        );
+
+      if (error) {
+        setMessage(error.message);
+        return;
+      }
+
+      setMessageType("success");
+
+      setMessage(
+        "Password reset email sent. Check your email and follow the link to create a new password."
+      );
+    } catch (error) {
+      console.error(
+        "PASSWORD RESET ERROR:",
+        error
+      );
+
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong."
+      );
+    } finally {
+      setForgotLoading(false);
+    }
   }
 
   return (
@@ -99,8 +180,11 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <form onSubmit={handleLogin}>
-          {/* Email */}
+        <form
+          method="post"
+          action="#"
+          onSubmit={handleLogin}
+        >
           <label
             htmlFor="email"
             style={{
@@ -119,8 +203,12 @@ export default function LoginPage() {
             autoComplete="email"
             placeholder="Enter your email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            disabled={loading}
+            onChange={(e) =>
+              setEmail(e.target.value)
+            }
+            disabled={
+              loading || forgotLoading
+            }
             style={{
               width: "100%",
               boxSizing: "border-box",
@@ -134,7 +222,6 @@ export default function LoginPage() {
             }}
           />
 
-          {/* Password */}
           <label
             htmlFor="password"
             style={{
@@ -154,8 +241,12 @@ export default function LoginPage() {
             autoComplete="current-password"
             placeholder="Enter your password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            disabled={loading}
+            onChange={(e) =>
+              setPassword(e.target.value)
+            }
+            disabled={
+              loading || forgotLoading
+            }
             style={{
               width: "100%",
               boxSizing: "border-box",
@@ -169,42 +260,89 @@ export default function LoginPage() {
             }}
           />
 
-          {/* Login button */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              marginTop: "10px",
+            }}
+          >
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              disabled={
+                loading || forgotLoading
+              }
+              style={{
+                border: "none",
+                background: "transparent",
+                color: "#60a5fa",
+                fontSize: "14px",
+                fontWeight: "600",
+                cursor:
+                  loading || forgotLoading
+                    ? "not-allowed"
+                    : "pointer",
+                padding: "4px 0",
+              }}
+            >
+              {forgotLoading
+                ? "Sending..."
+                : "Forgot password?"}
+            </button>
+          </div>
+
           <button
             type="submit"
-            disabled={loading}
+            disabled={
+              loading || forgotLoading
+            }
             style={{
               width: "100%",
-              marginTop: "25px",
+              marginTop: "20px",
               padding: "15px",
               border: "none",
               borderRadius: "10px",
-              background: loading
-                ? "#475569"
-                : "#2563eb",
+              background:
+                loading || forgotLoading
+                  ? "#475569"
+                  : "#2563eb",
               color: "#ffffff",
               fontSize: "16px",
               fontWeight: "700",
-              cursor: loading
-                ? "not-allowed"
-                : "pointer",
+              cursor:
+                loading || forgotLoading
+                  ? "not-allowed"
+                  : "pointer",
             }}
           >
-            {loading ? "Logging in..." : "Login"}
+            {loading
+              ? "Logging in..."
+              : "Login"}
           </button>
         </form>
 
-        {/* Error / status message */}
         {message && (
           <div
             style={{
               marginTop: "20px",
               padding: "12px",
               borderRadius: "10px",
-              background: "#020617",
-              color: "#f87171",
+              background:
+                messageType === "success"
+                  ? "#052e16"
+                  : "#020617",
+              color:
+                messageType === "success"
+                  ? "#4ade80"
+                  : "#f87171",
+              border:
+                messageType === "success"
+                  ? "1px solid #166534"
+                  : "1px solid #1e293b",
               textAlign: "center",
               lineHeight: "1.5",
+              fontSize: "14px",
             }}
           >
             {message}

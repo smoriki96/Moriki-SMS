@@ -1,458 +1,694 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
+import {
+  useSearchParams,
+  useRouter,
+} from "next/navigation";
 import { supabase } from "../../lib/supabase";
+
+type SmsMessage = {
+  sender?: string;
+  text?: string;
+  code?: string;
+  created_at?: string;
+};
 
 type Order = {
   id: string;
-  phone_number?: string | null;
-  number?: string | null;
-  country?: string | null;
-  service?: string | null;
-  status?: string | null;
-  created_at?: string | null;
+  country?: string;
+  service?: string;
+  phone_number?: string;
+  status?: string;
+  order_status?: string;
+  amount?: number;
+  fivesim_order_id?: number | null;
+  created_at?: string;
 };
 
-export default function ActivationPage() {
+function ActivationContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+
   const orderId = searchParams.get("id");
 
   const [order, setOrder] = useState<Order | null>(null);
+  const [sms, setSms] = useState<SmsMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
-  const [refreshing, setRefreshing] = useState(false);
+  const [message, setMessage] = useState("");
 
-  async function loadOrder() {
+  const loadOrder = useCallback(async () => {
     if (!orderId) {
-      setError("No order was selected.");
+      setError("No order ID was provided.");
       setLoading(false);
       return;
     }
 
-    setError("");
+    try {
+      setError("");
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-    if (!user) {
-      setError("Please log in to view this activation.");
+      if (!session?.access_token) {
+        setError(
+          "Your session has expired. Please log in again."
+        );
+        setLoading(false);
+        return;
+      }
+
+      const response = await fetch(
+        `/api/orders/${encodeURIComponent(orderId)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          cache: "no-store",
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result?.error ||
+            "Unable to load this activation."
+        );
+      }
+
+      setOrder(result.order);
+    } catch (err) {
+      console.error("Activation error:", err);
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load activation."
+      );
+    } finally {
       setLoading(false);
-      return;
     }
+  }, [orderId]);
 
-    const { data, error: orderError } = await supabase
-      .from("orders")
-      .select("*")
-      .eq("id", orderId)
-      .eq("user_id", user.id)
-      .single();
+  const checkFiveSim = useCallback(async () => {
+    if (!orderId) return;
 
-    if (orderError) {
-      console.error(orderError);
-      setError("Order could not be found.");
-      setOrder(null);
-    } else {
-      setOrder(data as Order);
+    try {
+      setChecking(true);
+      setMessage("");
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        setError("Your session has expired.");
+        return;
+      }
+
+      const response = await fetch(
+        `/api/5sim?action=check&orderId=${encodeURIComponent(
+          orderId
+        )}`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          cache: "no-store",
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result?.error ||
+            "Unable to check activation."
+        );
+      }
+
+      if (result.phone) {
+        setOrder((previous) =>
+          previous
+            ? {
+                ...previous,
+                phone_number:
+                  result.phone,
+                country:
+                  result.country ||
+                  previous.country,
+                service:
+                  result.service ||
+                  previous.service,
+                status:
+                  result.status ||
+                  previous.status,
+                fivesim_order_id:
+                  result.fivesim_order_id ||
+                  previous.fivesim_order_id,
+              }
+            : previous
+        );
+      }
+
+      if (Array.isArray(result.sms)) {
+        setSms(result.sms);
+      }
+
+      if (result.status) {
+        setMessage(
+          result.sms?.length
+            ? "SMS received successfully."
+            : `Activation status: ${result.status}`
+        );
+      }
+    } catch (err) {
+      console.error(
+        "5SIM check error:",
+        err
+      );
+
+      setMessage(
+        err instanceof Error
+          ? err.message
+          : "Unable to check activation."
+      );
+    } finally {
+      setChecking(false);
     }
-
-    setLoading(false);
-  }
+  }, [orderId]);
 
   useEffect(() => {
     loadOrder();
-  }, [orderId]);
+  }, [loadOrder]);
 
-  async function refreshActivation() {
-    setRefreshing(true);
-    await loadOrder();
-    setRefreshing(false);
+  useEffect(() => {
+    if (!order?.fivesim_order_id) {
+      return;
+    }
+
+    checkFiveSim();
+
+    const interval = setInterval(() => {
+      checkFiveSim();
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [
+    order?.fivesim_order_id,
+    checkFiveSim,
+  ]);
+
+  const copyCode = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setMessage("Copied successfully.");
+    } catch {
+      setMessage("Unable to copy.");
+    }
+  };
+
+  const status =
+    order?.status ||
+    order?.order_status ||
+    "pending";
+
+  const normalizedStatus =
+    status.toLowerCase();
+
+  const isReceived =
+    sms.length > 0 ||
+    normalizedStatus === "received";
+
+  const isFinished =
+    normalizedStatus === "finished";
+
+  const isCanceled =
+    normalizedStatus === "canceled" ||
+    normalizedStatus === "cancelled";
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-white">
+        <header className="border-b border-white/10 bg-slate-950">
+          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-5 sm:px-6">
+            <button
+              onClick={() => router.push("/")}
+              className="text-xl font-bold tracking-tight"
+            >
+              <span className="text-white">
+                Moriki
+              </span>{" "}
+              <span className="text-cyan-400">
+                SMS
+              </span>
+            </button>
+
+            <button
+              onClick={() =>
+                router.push("/numbers")
+              }
+              className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 transition hover:bg-white/5 hover:text-white"
+            >
+              Numbers
+            </button>
+          </div>
+        </header>
+
+        <div className="mx-auto flex min-h-[70vh] max-w-3xl items-center justify-center px-6">
+          <div className="w-full rounded-3xl border border-white/10 bg-white/[0.04] p-10 text-center shadow-2xl">
+            <div className="mx-auto mb-6 h-12 w-12 animate-spin rounded-full border-4 border-cyan-400 border-t-transparent" />
+
+            <h1 className="text-2xl font-bold">
+              Loading activation...
+            </h1>
+
+            <p className="mt-2 text-sm text-slate-400">
+              Please wait while we load your
+              number.
+            </p>
+          </div>
+        </div>
+      </main>
+    );
   }
 
-  const phoneNumber =
-    order?.phone_number ||
-    order?.number ||
-    "Number not available";
+  if (error) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-white">
+        <header className="border-b border-white/10 bg-slate-950">
+          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-5 sm:px-6">
+            <button
+              onClick={() => router.push("/")}
+              className="text-xl font-bold"
+            >
+              <span>Moriki</span>{" "}
+              <span className="text-cyan-400">
+                SMS
+              </span>
+            </button>
 
-  const country = order?.country || "Unknown country";
-  const service = order?.service || "Unknown service";
-  const status = order?.status || "pending";
+            <button
+              onClick={() =>
+                router.push("/numbers")
+              }
+              className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 hover:bg-white/5 hover:text-white"
+            >
+              Numbers
+            </button>
+          </div>
+        </header>
+
+        <div className="mx-auto max-w-3xl px-6 py-16">
+          <div className="rounded-3xl border border-red-400/20 bg-red-500/5 p-8 shadow-2xl">
+            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/10 text-2xl">
+              ⚠️
+            </div>
+
+            <h1 className="text-2xl font-bold">
+              Activation could not be loaded
+            </h1>
+
+            <p className="mt-3 text-sm leading-6 text-red-300">
+              {error}
+            </p>
+
+            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+              <button
+                onClick={loadOrder}
+                className="rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 transition hover:bg-cyan-400"
+              >
+                Try Again
+              </button>
+
+              <button
+                onClick={() =>
+                  router.push("/numbers")
+                }
+                className="rounded-xl border border-white/10 px-5 py-3 font-semibold text-white transition hover:bg-white/5"
+              >
+                Back to Numbers
+              </button>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
-    <main className="page">
-      <style>{`
-        * {
-          box-sizing: border-box;
-        }
+    <main className="min-h-screen bg-slate-950 text-white">
+      <header className="sticky top-0 z-30 border-b border-white/10 bg-slate-950/90 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
+          <button
+            onClick={() => router.push("/")}
+            className="text-xl font-bold tracking-tight"
+          >
+            <span className="text-white">
+              Moriki
+            </span>{" "}
+            <span className="text-cyan-400">
+              SMS
+            </span>
+          </button>
 
-        body {
-          margin: 0;
-          background: #020617;
-          font-family: Arial, sans-serif;
-        }
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              onClick={() =>
+                router.push("/admin/dashboard")
+              }
+              className="hidden rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 transition hover:bg-white/5 hover:text-white sm:block"
+            >
+              Dashboard
+            </button>
 
-        .page {
-          min-height: 100vh;
-          color: white;
-          background:
-            radial-gradient(
-              circle at top right,
-              rgba(33,150,243,.18),
-              transparent 35%
-            ),
-            #020617;
-        }
-
-        .header {
-          border-bottom: 1px solid rgba(255,255,255,.08);
-          background: rgba(2,6,23,.95);
-        }
-
-        .headerInner {
-          max-width: 1100px;
-          margin: auto;
-          padding: 18px 20px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .logo {
-          color: white;
-          text-decoration: none;
-          font-size: 24px;
-          font-weight: 900;
-        }
-
-        .logo span {
-          color: #2196f3;
-        }
-
-        .back {
-          color: #94a3b8;
-          text-decoration: none;
-          font-size: 14px;
-          font-weight: 700;
-        }
-
-        .container {
-          max-width: 850px;
-          margin: auto;
-          padding: 55px 20px 80px;
-        }
-
-        .title {
-          text-align: center;
-          margin-bottom: 35px;
-        }
-
-        .title h1 {
-          margin: 0 0 10px;
-          font-size: 38px;
-        }
-
-        .title p {
-          margin: 0;
-          color: #94a3b8;
-        }
-
-        .card {
-          background: #0f172a;
-          border: 1px solid rgba(255,255,255,.08);
-          border-radius: 22px;
-          padding: 30px;
-          margin-bottom: 20px;
-        }
-
-        .numberBox {
-          text-align: center;
-          padding: 30px 15px;
-          border-radius: 18px;
-          background:
-            linear-gradient(
-              135deg,
-              rgba(33,150,243,.16),
-              rgba(2,6,23,.5)
-            );
-          border: 1px solid rgba(33,150,243,.2);
-          margin-bottom: 25px;
-        }
-
-        .numberLabel {
-          color: #94a3b8;
-          font-size: 13px;
-          margin-bottom: 12px;
-        }
-
-        .number {
-          font-size: 30px;
-          font-weight: 900;
-          letter-spacing: 1px;
-          word-break: break-word;
-        }
-
-        .details {
-          display: grid;
-          grid-template-columns: repeat(2,1fr);
-          gap: 15px;
-        }
-
-        .detail {
-          padding: 18px;
-          border-radius: 14px;
-          background: #020617;
-          border: 1px solid rgba(255,255,255,.06);
-        }
-
-        .label {
-          color: #64748b;
-          font-size: 12px;
-          margin-bottom: 7px;
-        }
-
-        .value {
-          color: #e2e8f0;
-          font-weight: 800;
-          word-break: break-word;
-        }
-
-        .status {
-          display: inline-flex;
-          padding: 7px 12px;
-          border-radius: 999px;
-          background: rgba(34,197,94,.12);
-          color: #4ade80;
-          font-size: 12px;
-          font-weight: 900;
-          text-transform: capitalize;
-        }
-
-        .smsBox {
-          text-align: center;
-          padding: 35px 20px;
-          border: 1px dashed rgba(255,255,255,.15);
-          border-radius: 18px;
-        }
-
-        .smsIcon {
-          font-size: 45px;
-          margin-bottom: 12px;
-        }
-
-        .smsBox h2 {
-          margin: 0 0 10px;
-        }
-
-        .smsBox p {
-          color: #94a3b8;
-          line-height: 1.6;
-          font-size: 14px;
-        }
-
-        .refresh {
-          margin-top: 15px;
-          border: 0;
-          border-radius: 10px;
-          padding: 13px 20px;
-          background: #2196f3;
-          color: white;
-          font-weight: 900;
-          cursor: pointer;
-        }
-
-        .refresh:disabled {
-          opacity: .6;
-          cursor: not-allowed;
-        }
-
-        .error {
-          padding: 20px;
-          border-radius: 15px;
-          background: rgba(239,68,68,.1);
-          border: 1px solid rgba(239,68,68,.25);
-          color: #fca5a5;
-          text-align: center;
-        }
-
-        .loading {
-          text-align: center;
-          color: #94a3b8;
-          padding: 60px 20px;
-        }
-
-        .links {
-          display: flex;
-          justify-content: center;
-          gap: 12px;
-          flex-wrap: wrap;
-          margin-top: 25px;
-        }
-
-        .linkButton {
-          padding: 12px 18px;
-          border-radius: 10px;
-          background: #0f172a;
-          border: 1px solid rgba(255,255,255,.08);
-          color: white;
-          text-decoration: none;
-          font-size: 14px;
-          font-weight: 800;
-        }
-
-        @media (max-width: 600px) {
-          .container {
-            padding: 40px 15px 60px;
-          }
-
-          .title h1 {
-            font-size: 30px;
-          }
-
-          .card {
-            padding: 20px;
-          }
-
-          .details {
-            grid-template-columns: 1fr;
-          }
-
-          .number {
-            font-size: 24px;
-          }
-        }
-      `}</style>
-
-      <header className="header">
-        <div className="headerInner">
-          <Link href="/" className="logo">
-            Moriki <span>SMS</span>
-          </Link>
-
-          <Link href="/orders" className="back">
-            ← My Orders
-          </Link>
+            <button
+              onClick={() =>
+                router.push("/numbers")
+              }
+              className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-cyan-400"
+            >
+              Numbers
+            </button>
+          </div>
         </div>
       </header>
 
-      <div className="container">
-        <div className="title">
-          <h1>Number Activation</h1>
-          <p>
-            View your purchased number and activation status.
+      <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
+        <div className="mb-8">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-cyan-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
+            Activation
+          </div>
+
+          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+            Your activation
+          </h1>
+
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400 sm:text-base">
+            Your verification SMS will appear
+            here automatically. Keep this page
+            open while waiting for the message.
           </p>
         </div>
 
-        {loading ? (
-          <div className="loading">
-            Loading activation...
-          </div>
-        ) : error ? (
-          <div className="error">
-            {error}
-          </div>
-        ) : order ? (
-          <>
-            <section className="card">
-              <div className="numberBox">
-                <div className="numberLabel">
-                  YOUR VIRTUAL NUMBER
+        <div className="grid gap-6 lg:grid-cols-[1fr_1.15fr]">
+          <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] shadow-2xl">
+            <div className="border-b border-white/10 px-6 py-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Your number
+                  </p>
+
+                  <h2 className="mt-1 text-xl font-bold">
+                    Activation details
+                  </h2>
                 </div>
 
-                <div className="number">
-                  {phoneNumber}
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-400/10 text-xl">
+                  📱
                 </div>
               </div>
+            </div>
 
-              <div className="details">
-                <div className="detail">
-                  <div className="label">
-                    COUNTRY
-                  </div>
-
-                  <div className="value">
-                    {country}
-                  </div>
-                </div>
-
-                <div className="detail">
-                  <div className="label">
-                    SERVICE
-                  </div>
-
-                  <div className="value">
-                    {service}
-                  </div>
-                </div>
-
-                <div className="detail">
-                  <div className="label">
-                    STATUS
-                  </div>
-
-                  <div className="status">
-                    {status}
-                  </div>
-                </div>
-
-                <div className="detail">
-                  <div className="label">
-                    ORDER ID
-                  </div>
-
-                  <div className="value">
-                    {order.id}
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section className="card">
-              <div className="smsBox">
-                <div className="smsIcon">
-                  💬
-                </div>
-
-                <h2>
-                  Waiting for SMS
-                </h2>
-
-                <p>
-                  Your verification SMS will appear
-                  here when it becomes available.
+            <div className="space-y-5 p-6">
+              <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/5 p-5">
+                <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                  Phone number
                 </p>
 
-                <button
-                  className="refresh"
-                  onClick={refreshActivation}
-                  disabled={refreshing}
-                >
-                  {refreshing
-                    ? "Checking..."
-                    : "↻ Refresh Activation"}
-                </button>
+                <div className="mt-2 flex items-center justify-between gap-4">
+                  <p className="break-all text-2xl font-bold tracking-wide text-white sm:text-3xl">
+                    {order?.phone_number ||
+                      "Waiting..."}
+                  </p>
+
+                  {order?.phone_number && (
+                    <button
+                      onClick={() =>
+                        copyCode(
+                          order.phone_number ||
+                            ""
+                        )
+                      }
+                      className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+                    >
+                      Copy
+                    </button>
+                  )}
+                </div>
               </div>
-            </section>
 
-            <div className="links">
-              <Link
-                href="/orders"
-                className="linkButton"
-              >
-                View Orders
-              </Link>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                  <p className="text-xs uppercase tracking-wider text-slate-500">
+                    Country
+                  </p>
 
-              <Link
-                href="/numbers"
-                className="linkButton"
-              >
-                Buy Another Number
-              </Link>
+                  <p className="mt-2 font-semibold text-white">
+                    {order?.country || "—"}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                  <p className="text-xs uppercase tracking-wider text-slate-500">
+                    Service
+                  </p>
+
+                  <p className="mt-2 font-semibold text-white">
+                    {order?.service || "—"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-wider text-slate-500">
+                      Status
+                    </p>
+
+                    <p className="mt-2 font-semibold text-white">
+                      {isReceived
+                        ? "SMS Received"
+                        : isFinished
+                        ? "Completed"
+                        : isCanceled
+                        ? "Canceled"
+                        : "Waiting for SMS"}
+                    </p>
+                  </div>
+
+                  <span
+                    className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${
+                      isReceived
+                        ? "bg-emerald-400/10 text-emerald-400"
+                        : isCanceled
+                        ? "bg-red-400/10 text-red-400"
+                        : isFinished
+                        ? "bg-blue-400/10 text-blue-400"
+                        : "bg-amber-400/10 text-amber-400"
+                    }`}
+                  >
+                    <span
+                      className={`h-1.5 w-1.5 ${
+                        isReceived
+                          ? "bg-emerald-400"
+                          : isCanceled
+                          ? "bg-red-400"
+                          : isFinished
+                          ? "bg-blue-400"
+                          : "animate-pulse bg-amber-400"
+                      } rounded-full`}
+                    />
+
+                    {isReceived
+                      ? "Received"
+                      : isCanceled
+                      ? "Canceled"
+                      : isFinished
+                      ? "Finished"
+                      : "Pending"}
+                  </span>
+                </div>
+              </div>
             </div>
-          </>
-        ) : null}
+          </div>
+
+          <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 px-6 py-5">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  Verification
+                </p>
+
+                <h2 className="mt-1 text-xl font-bold">
+                  SMS messages
+                </h2>
+              </div>
+
+              <button
+                onClick={checkFiveSim}
+                disabled={
+                  checking ||
+                  !order?.fivesim_order_id
+                }
+                className="rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-bold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {checking
+                  ? "Checking..."
+                  : "Check SMS"}
+              </button>
+            </div>
+
+            <div className="p-6">
+              {sms.length === 0 ? (
+                <div className="flex min-h-[300px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-black/20 p-8 text-center">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-cyan-400/10 text-3xl">
+                    💬
+                  </div>
+
+                  <h3 className="mt-5 text-lg font-bold">
+                    Waiting for SMS
+                  </h3>
+
+                  <p className="mt-2 max-w-sm text-sm leading-6 text-slate-400">
+                    Once your verification message
+                    arrives, it will automatically
+                    appear here.
+                  </p>
+
+                  {order?.fivesim_order_id ? (
+                    <div className="mt-6 inline-flex items-center gap-2 rounded-full bg-amber-400/10 px-4 py-2 text-xs font-medium text-amber-400">
+                      <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
+                      Automatically checking
+                    </div>
+                  ) : (
+                    <div className="mt-6 rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-xs leading-5 text-amber-400">
+                      This is an old test order
+                      and is not connected to a
+                      5SIM activation.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {sms.map((item, index) => (
+                    <div
+                      key={`${item.created_at || "sms"}-${index}`}
+                      className="rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-5"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs uppercase tracking-wider text-slate-500">
+                            Sender
+                          </p>
+
+                          <p className="mt-1 font-semibold text-white">
+                            {item.sender ||
+                              "Unknown sender"}
+                          </p>
+                        </div>
+
+                        {item.code && (
+                          <button
+                            onClick={() =>
+                              copyCode(
+                                item.code || ""
+                              )
+                            }
+                            className="rounded-xl bg-emerald-400 px-4 py-2.5 text-lg font-bold tracking-wider text-slate-950 transition hover:bg-emerald-300"
+                          >
+                            {item.code}
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="mt-4 rounded-xl border border-white/5 bg-black/20 p-4">
+                        <p className="text-sm leading-6 text-slate-200">
+                          {item.text ||
+                            "No message text"}
+                        </p>
+                      </div>
+
+                      {item.created_at && (
+                        <p className="mt-3 text-xs text-slate-500">
+                          {new Date(
+                            item.created_at
+                          ).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {message && (
+                <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-center text-sm text-slate-400">
+                  {message}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Order ID
+              </p>
+
+              <p className="mt-1 break-all font-mono text-xs text-slate-400">
+                {order?.id}
+              </p>
+            </div>
+
+            <button
+              onClick={() =>
+                router.push("/numbers")
+              }
+              className="rounded-xl border border-white/10 px-5 py-2.5 text-sm font-semibold text-slate-300 transition hover:bg-white/5 hover:text-white"
+            >
+              ← Get another number
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function ActivationLoading() {
+  return (
+    <main className="min-h-screen bg-slate-950 text-white">
+      <div className="flex min-h-screen items-center justify-center px-6">
+        <div className="text-center">
+          <div className="mx-auto mb-5 h-10 w-10 animate-spin rounded-full border-4 border-cyan-400 border-t-transparent" />
+
+          <p className="text-slate-400">
+            Loading activation...
+          </p>
+        </div>
       </div>
     </main>
+  );
+}
+
+export default function ActivationPage() {
+  return (
+    <Suspense fallback={<ActivationLoading />}>
+      <ActivationContent />
+    </Suspense>
   );
 }

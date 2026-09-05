@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { supabase } from "../../lib/supabase";
 
 type Transaction = {
@@ -48,7 +49,7 @@ export default function WalletPage() {
         throw walletError;
       }
 
-      setBalance(Number(wallet?.balance || 0));
+      setBalance(Number(wallet?.balance ?? 0));
 
       const {
         data: transactionData,
@@ -105,7 +106,8 @@ export default function WalletPage() {
       type === "deposit" ||
       type === "fund" ||
       type === "funding" ||
-      type === "credit"
+      type === "credit" ||
+      type === "refund"
     );
   }
 
@@ -138,16 +140,16 @@ export default function WalletPage() {
         body {
           margin: 0;
           background: #020617;
+          font-family: Arial, sans-serif;
         }
 
         .page {
           min-height: 100vh;
           color: white;
-          font-family: Arial, sans-serif;
           background:
             radial-gradient(
               circle at top right,
-              rgba(33, 150, 243, 0.18),
+              rgba(33,150,243,.18),
               transparent 35%
             ),
             linear-gradient(
@@ -173,6 +175,8 @@ export default function WalletPage() {
         }
 
         .logo {
+          color: white;
+          text-decoration: none;
           font-size: 25px;
           font-weight: 900;
         }
@@ -190,6 +194,7 @@ export default function WalletPage() {
           color: #94a3b8;
           text-decoration: none;
           font-size: 14px;
+          font-weight: 700;
         }
 
         .nav a:hover {
@@ -238,10 +243,6 @@ export default function WalletPage() {
           text-decoration: none;
           font-size: 15px;
           font-weight: 900;
-        }
-
-        .fund-button:hover {
-          opacity: .92;
         }
 
         .balance-card {
@@ -411,13 +412,14 @@ export default function WalletPage() {
 
       <header className="header">
         <div className="header-inner">
-          <div className="logo">
+          <Link href="/" className="logo">
             Moriki <span>SMS</span>
-          </div>
+          </Link>
 
           <nav className="nav">
-            <a href="/">Home</a>
-            <a href="/numbers">Numbers</a>
+            <Link href="/">Home</Link>
+            <Link href="/numbers">Numbers</Link>
+            <Link href="/orders">Orders</Link>
           </nav>
         </div>
       </header>
@@ -432,12 +434,12 @@ export default function WalletPage() {
             <h1>My Wallet</h1>
           </div>
 
-          <a
+          <Link
             href="/wallet/fund"
             className="fund-button"
           >
             + Fund Wallet
-          </a>
+          </Link>
         </div>
 
         {error && (
