@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { useRouter } from "next/navigation";
+import { supabase } from "../../../lib/supabase";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
-);
+const ADMIN_EMAIL = "namoriki30@gmail.com";
 
 type Ticket = {
   id: string;
@@ -16,676 +14,699 @@ type Ticket = {
   message: string;
   status: string;
   admin_reply: string | null;
-  attachment_path: string | null;
-  attachment_url?: string | null;
+  attachment_url: string | null;
+  customer_email: string;
   created_at: string;
   updated_at: string;
 };
 
-export default function SupportPage() {
+export default function AdminSupportPage() {
+  const router = useRouter();
+
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [category, setCategory] = useState("WhatsApp");
-  const [subject, setSubject] = useState("");
-  const [message, setMessage] = useState("");
-
-  const [selectedFile, setSelectedFile] =
-    useState<File | null>(null);
-
-  const [preview, setPreview] =
-    useState<string | null>(null);
-
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-
-  const [messageText, setMessageText] =
-    useState("");
-
-  const [messageType, setMessageType] =
-    useState<"success" | "error">("success");
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [pageMessage, setPageMessage] = useState("");
+  const [pageMessageType, setPageMessageType] = useState<
+    "success" | "error"
+  >("error");
 
   useEffect(() => {
-    loadTickets();
+    checkAdminAndLoad();
   }, []);
 
-  async function getAccessToken() {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    return session?.access_token || null;
-  }
-
-  async function loadTickets() {
+  async function checkAdminAndLoad() {
     setLoading(true);
-    setMessageText("");
+    setPageMessage("");
 
     try {
-      const token = await getAccessToken();
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
 
-      if (!token) {
-        setMessageType("error");
-        setMessageText(
-          "Please log in again."
-        );
-        setLoading(false);
+      if (userError || !user) {
+        router.replace("/login");
         return;
       }
 
-      const response = await fetch(
-        "/api/support",
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          cache: "no-store",
-        }
-      );
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          result.error ||
-            "Unable to load support tickets."
-        );
+      if (
+        !user.email ||
+        user.email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()
+      ) {
+        router.replace("/login");
+        return;
       }
 
-      setTickets(result.tickets || []);
-    } catch (error: any) {
-      console.error(
-        "LOAD SUPPORT ERROR:",
-        error
-      );
+      await loadTickets();
+    } catch (error) {
+      console.error("ADMIN SUPPORT PAGE ERROR:", error);
 
-      setMessageType("error");
-      setMessageText(
-        error?.message ||
-          "Unable to load support tickets."
+      setPageMessageType("error");
+      setPageMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to load support requests."
       );
     } finally {
       setLoading(false);
     }
   }
 
-  function handleFileChange(
-    event: React.ChangeEvent<HTMLInputElement>
-  ) {
-    const file = event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    const allowedTypes = [
-      "image/jpeg",
-      "image/png",
-      "image/webp",
-      "image/gif",
-    ];
-
-    if (!allowedTypes.includes(file.type)) {
-      setMessageType("error");
-      setMessageText(
-        "Please select a JPG, PNG, WEBP or GIF image."
-      );
-
-      event.target.value = "";
-      return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      setMessageType("error");
-      setMessageText(
-        "Image must be smaller than 5MB."
-      );
-
-      event.target.value = "";
-      return;
-    }
-
-    if (preview) {
-      URL.revokeObjectURL(preview);
-    }
-
-    const imageUrl =
-      URL.createObjectURL(file);
-
-    setSelectedFile(file);
-    setPreview(imageUrl);
-    setMessageText("");
-  }
-
-  function removeFile() {
-    if (preview) {
-      URL.revokeObjectURL(preview);
-    }
-
-    setSelectedFile(null);
-    setPreview(null);
-
-    const input =
-      document.getElementById(
-        "support-attachment"
-      ) as HTMLInputElement | null;
-
-    if (input) {
-      input.value = "";
-    }
-  }
-
-  async function submitTicket(
-    event: React.FormEvent<HTMLFormElement>
-  ) {
-    event.preventDefault();
-
-    setMessageText("");
-
-    if (!subject.trim()) {
-      setMessageType("error");
-      setMessageText(
-        "Please enter a subject."
-      );
-      return;
-    }
-
-    if (!message.trim()) {
-      setMessageType("error");
-      setMessageText(
-        "Please describe your problem."
-      );
-      return;
-    }
-
-    setSending(true);
-
+  async function loadTickets() {
     try {
-      const token =
-        await getAccessToken();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      if (!token) {
-        throw new Error(
-          "Your session has expired. Please log in again."
-        );
+      if (!session?.access_token) {
+        router.replace("/login");
+        return;
       }
 
-      const formData = new FormData();
+      const response = await fetch("/api/admin/support", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        cache: "no-store",
+      });
 
-      formData.append(
-        "category",
-        category
-      );
-
-      formData.append(
-        "subject",
-        subject.trim()
-      );
-
-      formData.append(
-        "message",
-        message.trim()
-      );
-
-      if (selectedFile) {
-        formData.append(
-          "attachment",
-          selectedFile
-        );
-      }
-
-      const response = await fetch(
-        "/api/support",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: formData,
-        }
-      );
-
-      const result =
-        await response.json();
+      const data = await response.json();
 
       if (!response.ok) {
         throw new Error(
-          result.error ||
-            "Unable to send support request."
+          data?.error || "Unable to load support requests."
         );
       }
 
-      if (result.ticket) {
-        setTickets((current) => [
-          result.ticket,
-          ...current,
-        ]);
+      setTickets(data.tickets || []);
+    } catch (error) {
+      console.error("LOAD ADMIN SUPPORT ERROR:", error);
+
+      setPageMessageType("error");
+      setPageMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to load support requests."
+      );
+    }
+  }
+
+  async function saveTicket(
+    ticketId: string,
+    status: string,
+    adminReply: string
+  ) {
+    setSavingId(ticketId);
+    setPageMessage("");
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        router.replace("/login");
+        return;
       }
 
-      setSubject("");
-      setMessage("");
-      setCategory("WhatsApp");
-
-      removeFile();
-
-      setMessageType("success");
-      setMessageText(
-        "Your support request has been sent successfully."
+      const response = await fetch(
+        `/api/admin/support/${ticketId}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            status,
+            admin_reply: adminReply,
+          }),
+        }
       );
-    } catch (error: any) {
-      console.error(
-        "SEND SUPPORT ERROR:",
-        error
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.error || "Unable to update support request."
+        );
+      }
+
+      setTickets((currentTickets) =>
+        currentTickets.map((ticket) =>
+          ticket.id === ticketId
+            ? {
+                ...ticket,
+                status: data.ticket.status,
+                admin_reply: data.ticket.admin_reply,
+                updated_at: data.ticket.updated_at,
+              }
+            : ticket
+        )
       );
 
-      setMessageType("error");
-      setMessageText(
-        error?.message ||
-          "Unable to send support request."
+      setPageMessageType("success");
+      setPageMessage("Support request updated successfully.");
+    } catch (error) {
+      console.error("SAVE SUPPORT ERROR:", error);
+
+      setPageMessageType("error");
+      setPageMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to update support request."
       );
     } finally {
-      setSending(false);
+      setSavingId(null);
     }
   }
 
-  function statusClass(status: string) {
-    switch (status) {
-      case "resolved":
-        return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
-
-      case "closed":
-        return "border-slate-600 bg-slate-800 text-slate-300";
-
-      case "in_progress":
-        return "border-blue-500/30 bg-blue-500/10 text-blue-300";
-
-      default:
-        return "border-amber-500/30 bg-amber-500/10 text-amber-300";
-    }
+  function updateTicketField(
+    ticketId: string,
+    field: "status" | "admin_reply",
+    value: string
+  ) {
+    setTickets((currentTickets) =>
+      currentTickets.map((ticket) =>
+        ticket.id === ticketId
+          ? {
+              ...ticket,
+              [field]: value,
+            }
+          : ticket
+      )
+    );
   }
 
-  function formatStatus(status: string) {
-    if (status === "in_progress") {
-      return "In progress";
-    }
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.replace("/login");
+  }
 
+  if (loading) {
     return (
-      status.charAt(0).toUpperCase() +
-      status.slice(1)
+      <main
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#f5f7fb",
+          fontFamily: "Arial, sans-serif",
+        }}
+      >
+        <div
+          style={{
+            background: "#ffffff",
+            padding: "30px",
+            borderRadius: "16px",
+            boxShadow: "0 8px 30px rgba(0,0,0,0.08)",
+          }}
+        >
+          Loading Customer Care...
+        </div>
+      </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-white">
-      <header className="border-b border-slate-800 bg-slate-950">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white font-black text-slate-950">
-              M
-            </div>
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "#f5f7fb",
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
+      <header
+        style={{
+          background: "#111827",
+          color: "#ffffff",
+          padding: "18px 24px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "15px",
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "24px",
+            }}
+          >
+            Moriki SMS Customer Care
+          </h1>
 
-            <div>
-              <h1 className="font-bold">
-                Moriki{" "}
-                <span className="text-slate-400">
-                  SMS
-                </span>
-              </h1>
+          <p
+            style={{
+              margin: "5px 0 0",
+              color: "#d1d5db",
+              fontSize: "14px",
+            }}
+          >
+            Manage customer support requests
+          </p>
+        </div>
 
-              <p className="text-xs text-slate-500">
-                Customer Care
-              </p>
-            </div>
-          </div>
+        <div
+          style={{
+            display: "flex",
+            gap: "10px",
+            flexWrap: "wrap",
+          }}
+        >
+          <button
+            onClick={() => router.push("/admin")}
+            style={{
+              border: "1px solid #374151",
+              background: "#1f2937",
+              color: "#ffffff",
+              padding: "10px 15px",
+              borderRadius: "8px",
+              cursor: "pointer",
+            }}
+          >
+            Admin Dashboard
+          </button>
 
-          <div className="flex items-center gap-2">
-            <a
-              href="/account"
-              className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:border-slate-500 hover:text-white"
-            >
-              Account
-            </a>
-
-            <a
-              href="/admin/dashboard"
-              className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:border-slate-500 hover:text-white"
-            >
-              ← Dashboard
-            </a>
-          </div>
+          <button
+            onClick={handleLogout}
+            style={{
+              border: "none",
+              background: "#dc2626",
+              color: "#ffffff",
+              padding: "10px 15px",
+              borderRadius: "8px",
+              cursor: "pointer",
+            }}
+          >
+            Logout
+          </button>
         </div>
       </header>
 
-      <div className="mx-auto max-w-6xl px-6 py-10">
-        <div className="mb-8">
-          <p className="mb-2 text-sm font-medium text-slate-500">
-            CUSTOMER CARE
-          </p>
-
-          <h2 className="text-3xl font-bold">
-            How can we help?
-          </h2>
-
-          <p className="mt-2 text-slate-400">
-            Send us your problem and our support team will respond.
-          </p>
-        </div>
-
-        {messageText && (
+      <section
+        style={{
+          maxWidth: "1100px",
+          margin: "0 auto",
+          padding: "30px 20px 60px",
+        }}
+      >
+        {pageMessage && (
           <div
-            className={`mb-6 rounded-xl border px-4 py-3 text-sm ${
-              messageType === "success"
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                : "border-red-500/30 bg-red-500/10 text-red-300"
-            }`}
+            style={{
+              marginBottom: "20px",
+              padding: "14px 16px",
+              borderRadius: "10px",
+              background:
+                pageMessageType === "success"
+                  ? "#dcfce7"
+                  : "#fee2e2",
+              color:
+                pageMessageType === "success"
+                  ? "#166534"
+                  : "#991b1b",
+              border:
+                pageMessageType === "success"
+                  ? "1px solid #86efac"
+                  : "1px solid #fecaca",
+            }}
           >
-            {messageText}
+            {pageMessage}
           </div>
         )}
 
-        <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
-          <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-            <h3 className="text-lg font-semibold">
-              Contact Customer Care
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "15px",
+            marginBottom: "20px",
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: "22px",
+                color: "#111827",
+              }}
+            >
+              Support Requests
+            </h2>
+
+            <p
+              style={{
+                margin: "6px 0 0",
+                color: "#6b7280",
+              }}
+            >
+              {tickets.length} request
+              {tickets.length === 1 ? "" : "s"}
+            </p>
+          </div>
+
+          <button
+            onClick={loadTickets}
+            style={{
+              border: "1px solid #d1d5db",
+              background: "#ffffff",
+              color: "#111827",
+              padding: "10px 16px",
+              borderRadius: "8px",
+              cursor: "pointer",
+            }}
+          >
+            Refresh
+          </button>
+        </div>
+
+        {tickets.length === 0 ? (
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: "16px",
+              padding: "45px 20px",
+              textAlign: "center",
+              boxShadow: "0 5px 20px rgba(0,0,0,0.06)",
+            }}
+          >
+            <h3
+              style={{
+                margin: "0 0 8px",
+                color: "#111827",
+              }}
+            >
+              No support requests yet
             </h3>
 
-            <p className="mt-1 text-sm text-slate-500">
-              Having a problem with WhatsApp or another service?
-              Send us the details.
-            </p>
-
-            <form
-              onSubmit={submitTicket}
-              className="mt-6 space-y-5"
+            <p
+              style={{
+                margin: 0,
+                color: "#6b7280",
+              }}
             >
-              <div>
-                <label className="mb-2 block text-sm font-medium text-slate-300">
-                  Category
-                </label>
+              Customer complaints will appear here.
+            </p>
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gap: "20px",
+            }}
+          >
+            {tickets.map((ticket) => (
+              <SupportTicketCard
+                key={ticket.id}
+                ticket={ticket}
+                saving={savingId === ticket.id}
+                onChange={updateTicketField}
+                onSave={saveTicket}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
 
-                <select
-                  value={category}
-                  onChange={(e) =>
-                    setCategory(e.target.value)
-                  }
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-white"
-                >
-                  <option value="WhatsApp">
-                    WhatsApp
-                  </option>
+function SupportTicketCard({
+  ticket,
+  saving,
+  onChange,
+  onSave,
+}: {
+  ticket: Ticket;
+  saving: boolean;
+  onChange: (
+    ticketId: string,
+    field: "status" | "admin_reply",
+    value: string
+  ) => void;
+  onSave: (
+    ticketId: string,
+    status: string,
+    adminReply: string
+  ) => void;
+}) {
+  return (
+    <article
+      style={{
+        background: "#ffffff",
+        borderRadius: "16px",
+        padding: "22px",
+        boxShadow: "0 5px 20px rgba(0,0,0,0.06)",
+        border: "1px solid #e5e7eb",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: "15px",
+          flexWrap: "wrap",
+          marginBottom: "18px",
+        }}
+      >
+        <div>
+          <div
+            style={{
+              color: "#6b7280",
+              fontSize: "13px",
+              marginBottom: "5px",
+            }}
+          >
+            Customer
+          </div>
 
-                  <option value="Telegram">
-                    Telegram
-                  </option>
+          <strong
+            style={{
+              color: "#111827",
+              wordBreak: "break-word",
+            }}
+          >
+            {ticket.customer_email}
+          </strong>
+        </div>
 
-                  <option value="Number">
-                    Number problem
-                  </option>
-
-                  <option value="Payment">
-                    Payment
-                  </option>
-
-                  <option value="Account">
-                    Account
-                  </option>
-
-                  <option value="General">
-                    General
-                  </option>
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-slate-300">
-                  Subject
-                </label>
-
-                <input
-                  value={subject}
-                  onChange={(e) =>
-                    setSubject(e.target.value)
-                  }
-                  maxLength={120}
-                  placeholder="Example: WhatsApp verification problem"
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-white"
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-slate-300">
-                  Describe the problem
-                </label>
-
-                <textarea
-                  value={message}
-                  onChange={(e) =>
-                    setMessage(e.target.value)
-                  }
-                  rows={6}
-                  maxLength={3000}
-                  placeholder="Tell us what happened..."
-                  className="w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-white"
-                />
-
-                <p className="mt-1 text-right text-xs text-slate-600">
-                  {message.length}/3000
-                </p>
-              </div>
-
-              {/* ATTACHMENT */}
-              <div>
-                <label
-                  htmlFor="support-attachment"
-                  className="mb-2 block text-sm font-medium text-slate-300"
-                >
-                  Attach a picture
-                </label>
-
-                <div className="rounded-xl border border-slate-700 bg-slate-950 p-4">
-                  <label
-                    htmlFor="support-attachment"
-                    className="flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-slate-600 px-4 py-6 text-center transition hover:border-blue-500 hover:bg-slate-900"
-                  >
-                    <div>
-                      <div className="text-3xl">
-                        📎
-                      </div>
-
-                      <p className="mt-2 font-semibold text-white">
-                        Choose a picture
-                      </p>
-
-                      <p className="mt-1 text-xs text-slate-500">
-                        JPG, PNG, WEBP or GIF
-                      </p>
-
-                      <p className="mt-1 text-xs text-slate-600">
-                        Maximum size: 5MB
-                      </p>
-                    </div>
-                  </label>
-
-                  <input
-                    id="support-attachment"
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
-                    onChange={handleFileChange}
-                    className="mt-4 block w-full cursor-pointer text-sm text-slate-400 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:font-semibold file:text-white hover:file:bg-blue-500"
-                  />
-
-                  {selectedFile && (
-                    <div className="mt-4 overflow-hidden rounded-xl border border-slate-700">
-                      {preview && (
-                        <img
-                          src={preview}
-                          alt="Selected picture"
-                          className="max-h-64 w-full object-contain"
-                        />
-                      )}
-
-                      <div className="flex items-center justify-between gap-3 border-t border-slate-800 p-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-white">
-                            {selectedFile.name}
-                          </p>
-
-                          <p className="text-xs text-slate-500">
-                            {(
-                              selectedFile.size /
-                              1024 /
-                              1024
-                            ).toFixed(2)}{" "}
-                            MB
-                          </p>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={removeFile}
-                          className="shrink-0 rounded-lg border border-red-500/30 px-3 py-2 text-xs font-medium text-red-300 hover:bg-red-500/10"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={sending}
-                className="w-full rounded-xl bg-white px-5 py-3 font-semibold text-slate-950 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {sending
-                  ? "Sending..."
-                  : "Send Support Request"}
-              </button>
-            </form>
-          </section>
-
-          <section className="rounded-2xl border border-slate-800 bg-slate-900">
-            <div className="flex items-center justify-between border-b border-slate-800 p-6">
-              <div>
-                <h3 className="font-semibold">
-                  Your Support Requests
-                </h3>
-
-                <p className="mt-1 text-sm text-slate-500">
-                  View your previous requests and replies.
-                </p>
-              </div>
-
-              <button
-                onClick={loadTickets}
-                disabled={loading}
-                className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50"
-              >
-                Refresh
-              </button>
-            </div>
-
-            {loading ? (
-              <div className="p-10 text-center text-slate-500">
-                Loading your requests...
-              </div>
-            ) : tickets.length === 0 ? (
-              <div className="p-10 text-center">
-                <div className="text-4xl">
-                  💬
-                </div>
-
-                <p className="mt-4 font-medium">
-                  No support requests yet
-                </p>
-
-                <p className="mt-2 text-sm text-slate-500">
-                  Your support conversations will appear here.
-                </p>
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-800">
-                {tickets.map((ticket) => (
-                  <div
-                    key={ticket.id}
-                    className="p-6"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-slate-600">
-                          {ticket.category}
-                        </p>
-
-                        <h4 className="mt-1 font-semibold">
-                          {ticket.subject}
-                        </h4>
-
-                        <p className="mt-1 text-xs text-slate-600">
-                          {new Date(
-                            ticket.created_at
-                          ).toLocaleString()}
-                        </p>
-                      </div>
-
-                      <span
-                        className={`rounded-full border px-3 py-1 text-xs font-medium ${statusClass(
-                          ticket.status
-                        )}`}
-                      >
-                        {formatStatus(
-                          ticket.status
-                        )}
-                      </span>
-                    </div>
-
-                    <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950 p-4">
-                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-600">
-                        Your message
-                      </p>
-
-                      <p className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
-                        {ticket.message}
-                      </p>
-                    </div>
-
-                    {ticket.attachment_url && (
-                      <div className="mt-4">
-                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-600">
-                          Attached Picture
-                        </p>
-
-                        <a
-                          href={ticket.attachment_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          <img
-                            src={ticket.attachment_url}
-                            alt="Support attachment"
-                            className="max-h-72 max-w-full rounded-xl border border-slate-800 object-contain"
-                          />
-                        </a>
-                      </div>
-                    )}
-
-                    {ticket.admin_reply && (
-                      <div className="mt-4 rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
-                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-blue-400">
-                          Customer Care Reply
-                        </p>
-
-                        <p className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
-                          {ticket.admin_reply}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
+        <div
+          style={{
+            color: "#6b7280",
+            fontSize: "13px",
+          }}
+        >
+          {new Date(ticket.created_at).toLocaleString()}
         </div>
       </div>
-    </main>
+
+      <div
+        style={{
+          display: "grid",
+          gap: "15px",
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: "13px",
+              color: "#6b7280",
+              marginBottom: "5px",
+            }}
+          >
+            Category
+          </div>
+
+          <div
+            style={{
+              color: "#111827",
+              fontWeight: 600,
+            }}
+          >
+            {ticket.category}
+          </div>
+        </div>
+
+        <div>
+          <div
+            style={{
+              fontSize: "13px",
+              color: "#6b7280",
+              marginBottom: "5px",
+            }}
+          >
+            Subject
+          </div>
+
+          <div
+            style={{
+              color: "#111827",
+              fontWeight: 600,
+            }}
+          >
+            {ticket.subject}
+          </div>
+        </div>
+
+        <div>
+          <div
+            style={{
+              fontSize: "13px",
+              color: "#6b7280",
+              marginBottom: "5px",
+            }}
+          >
+            Customer Complaint
+          </div>
+
+          <div
+            style={{
+              background: "#f9fafb",
+              border: "1px solid #e5e7eb",
+              borderRadius: "10px",
+              padding: "14px",
+              color: "#374151",
+              whiteSpace: "pre-wrap",
+              lineHeight: 1.6,
+            }}
+          >
+            {ticket.message}
+          </div>
+        </div>
+
+        {ticket.attachment_url && (
+          <div>
+            <div
+              style={{
+                fontSize: "13px",
+                color: "#6b7280",
+                marginBottom: "7px",
+              }}
+            >
+              Attachment
+            </div>
+
+            <a
+              href={ticket.attachment_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                color: "#2563eb",
+                textDecoration: "none",
+                fontWeight: 600,
+              }}
+            >
+              View attachment
+            </a>
+          </div>
+        )}
+
+        <div>
+          <label
+            style={{
+              display: "block",
+              fontSize: "13px",
+              color: "#6b7280",
+              marginBottom: "7px",
+            }}
+          >
+            Status
+          </label>
+
+          <select
+            value={ticket.status}
+            onChange={(event) =>
+              onChange(
+                ticket.id,
+                "status",
+                event.target.value
+              )
+            }
+            style={{
+              width: "100%",
+              padding: "12px",
+              border: "1px solid #d1d5db",
+              borderRadius: "8px",
+              background: "#ffffff",
+              color: "#111827",
+            }}
+          >
+            <option value="open">Open</option>
+            <option value="in_progress">
+              In Progress
+            </option>
+            <option value="resolved">Resolved</option>
+            <option value="closed">Closed</option>
+          </select>
+        </div>
+
+        <div>
+          <label
+            style={{
+              display: "block",
+              fontSize: "13px",
+              color: "#6b7280",
+              marginBottom: "7px",
+            }}
+          >
+            Reply to Customer
+          </label>
+
+          <textarea
+            value={ticket.admin_reply || ""}
+            onChange={(event) =>
+              onChange(
+                ticket.id,
+                "admin_reply",
+                event.target.value
+              )
+            }
+            placeholder="Write your reply to the customer..."
+            rows={5}
+            maxLength={3000}
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              padding: "12px",
+              border: "1px solid #d1d5db",
+              borderRadius: "8px",
+              resize: "vertical",
+              color: "#111827",
+              background: "#ffffff",
+            }}
+          />
+        </div>
+
+        <button
+          onClick={() =>
+            onSave(
+              ticket.id,
+              ticket.status,
+              ticket.admin_reply || ""
+            )
+          }
+          disabled={saving}
+          style={{
+            width: "100%",
+            border: "none",
+            background: saving ? "#9ca3af" : "#111827",
+            color: "#ffffff",
+            padding: "13px",
+            borderRadius: "8px",
+            cursor: saving ? "not-allowed" : "pointer",
+            fontWeight: 600,
+          }}
+        >
+          {saving ? "Saving..." : "Save Response"}
+        </button>
+      </div>
+    </article>
   );
 }

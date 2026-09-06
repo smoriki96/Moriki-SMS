@@ -50,8 +50,8 @@ function getPriceFromProduct(product: any) {
   );
 
   return {
-    priceUSD: price,
-    quantity,
+    priceUSD: Number.isFinite(price) ? price : 0,
+    quantity: Number.isFinite(quantity) ? quantity : 0,
     priceNGN: calculateCustomerPrice(price),
   };
 }
@@ -123,9 +123,6 @@ async function fiveSimRequest(path: string) {
   return data;
 }
 
-/*
- * Get the authenticated customer.
- */
 async function getAuthenticatedUser(request: NextRequest) {
   if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
     throw new Error("Supabase configuration is missing.");
@@ -184,24 +181,6 @@ async function getAuthenticatedUser(request: NextRequest) {
   };
 }
 
-/*
- * Extract real operators from the 5SIM
- * countries response.
- *
- * 5SIM can return countries like:
- *
- * usa: {
- *   iso: {...},
- *   prefix: {...},
- *   text_en: "USA",
- *   text_ru: "США",
- *   virtual12: {...},
- *   virtual28: {...}
- * }
- *
- * The operator names are therefore the
- * keys other than metadata.
- */
 function extractOperators(countryData: any): string[] {
   if (!countryData || typeof countryData !== "object") {
     return [];
@@ -221,10 +200,6 @@ function extractOperators(countryData: any): string[] {
 
   const operators: string[] = [];
 
-  /*
-   * If a normal operators array exists,
-   * use it first.
-   */
   if (Array.isArray(countryData.operators)) {
     for (const item of countryData.operators) {
       const operator =
@@ -242,9 +217,6 @@ function extractOperators(countryData: any): string[] {
     }
   }
 
-  /*
-   * Also inspect the actual object keys.
-   */
   for (const key of Object.keys(countryData)) {
     if (metadataKeys.has(key)) {
       continue;
@@ -269,12 +241,6 @@ function extractOperators(countryData: any): string[] {
   );
 }
 
-/*
- * Resolve "any" into an actual 5SIM operator.
- *
- * IMPORTANT:
- * We NEVER send "any" to 5SIM.
- */
 async function resolveOperator(
   country: string,
   requestedOperator: string
@@ -362,18 +328,14 @@ export async function GET(
           any
         ]) => {
           const realCode =
-            normalizeCountryCode(
-              code
-            );
+            normalizeCountryCode(code);
 
           if (!realCode) {
             return;
           }
 
           const operators =
-            extractOperators(
-              value
-            );
+            extractOperators(value);
 
           countries.push({
             key: realCode,
@@ -395,11 +357,6 @@ export async function GET(
             operators,
           });
         }
-      );
-
-      console.log(
-        "5SIM COUNTRIES COUNT:",
-        countries.length
       );
 
       return responseJSON({
@@ -424,8 +381,7 @@ export async function GET(
         return responseJSON(
           {
             success: false,
-            error:
-              "Country is required.",
+            error: "Country is required.",
           },
           400
         );
@@ -436,31 +392,48 @@ export async function GET(
           countryParam
         );
 
-      const operator =
-        await resolveOperator(
-          country,
-          operatorParam || "any"
-        );
+      let operator: string;
 
-      console.log(
-        "5SIM PRODUCTS:",
-        {
-          country,
-          requestedOperator:
-            operatorParam || "any",
-          resolvedOperator:
-            operator,
-        }
-      );
-
-      const data =
-        await fiveSimRequest(
-          `/guest/products/${encodeURIComponent(
-            country
-          )}/${encodeURIComponent(
-            operator
-          )}`
+      try {
+        operator =
+          await resolveOperator(
+            country,
+            operatorParam || "any"
+          );
+      } catch (error: any) {
+        return responseJSON(
+          {
+            success: false,
+            error:
+              error?.message ||
+              "Unable to determine a 5SIM operator.",
+          },
+          400
         );
+      }
+
+      let data: any;
+
+      try {
+        data =
+          await fiveSimRequest(
+            `/guest/products/${encodeURIComponent(
+              country
+            )}/${encodeURIComponent(
+              operator
+            )}`
+          );
+      } catch (error: any) {
+        return responseJSON(
+          {
+            success: false,
+            error:
+              error?.message ||
+              "Unable to load 5SIM products.",
+          },
+          400
+        );
+      }
 
       const products: any[] = [];
 
@@ -477,8 +450,7 @@ export async function GET(
             );
 
           products.push({
-            product:
-              productName,
+            product: productName,
 
             priceUSD:
               pricing.priceUSD,
@@ -543,11 +515,25 @@ export async function GET(
           countryParam
         );
 
-      const operator =
-        await resolveOperator(
-          country,
-          operatorParam || "any"
+      let operator: string;
+
+      try {
+        operator =
+          await resolveOperator(
+            country,
+            operatorParam || "any"
+          );
+      } catch (error: any) {
+        return responseJSON(
+          {
+            success: false,
+            error:
+              error?.message ||
+              "Unable to determine a 5SIM operator.",
+          },
+          400
         );
+      }
 
       const product =
         productParam.trim();
@@ -574,9 +560,7 @@ export async function GET(
             operator,
             product,
             availableProducts:
-              Object.keys(
-                data || {}
-              ),
+              Object.keys(data || {}),
           },
           404
         );
@@ -647,9 +631,6 @@ export async function GET(
           countryParam
         );
 
-      /*
-       * Resolve "any" to a real operator.
-       */
       let operator: string;
 
       try {
@@ -673,20 +654,10 @@ export async function GET(
       const product =
         productParam.trim();
 
-      console.log(
-        "5SIM BUY:",
-        {
-          country,
-          requestedOperator:
-            operatorParam || "any",
-          resolvedOperator:
-            operator,
-          product,
-        }
-      );
-
       /*
-       * Authenticate customer.
+       * ========================================
+       * AUTHENTICATE CUSTOMER
+       * ========================================
        */
       const auth =
         await getAuthenticatedUser(
@@ -720,7 +691,24 @@ export async function GET(
       }
 
       /*
-       * Get current product information.
+       * Server-only Supabase client.
+       */
+      const adminClient =
+        createClient(
+          SUPABASE_URL,
+          SUPABASE_SERVICE_ROLE_KEY,
+          {
+            auth: {
+              persistSession: false,
+              autoRefreshToken: false,
+            },
+          }
+        );
+
+      /*
+       * ========================================
+       * GET CURRENT 5SIM PRICE
+       * ========================================
        */
       let productData: any;
 
@@ -777,40 +765,68 @@ export async function GET(
           rawProduct
         );
 
+      /*
+       * ========================================
+       * INITIAL PROVIDER COST
+       * ========================================
+       */
+      const providerCost =
+        Math.round(
+          pricing.priceUSD *
+            USD_TO_NGN
+        );
+
+      /*
+       * ========================================
+       * INITIAL CUSTOMER PRICE
+       * ========================================
+       */
       const amount =
-        pricing.priceNGN;
+        Math.round(
+          providerCost +
+            PROFIT_NGN
+        );
 
       if (
-        !Number.isFinite(amount) ||
-        amount <= 0
+        !Number.isFinite(
+          providerCost
+        ) ||
+        providerCost <= 0
       ) {
         return responseJSON(
           {
             success: false,
             error:
-              "Invalid purchase price.",
+              "Invalid 5SIM provider cost.",
+            priceUSD:
+              pricing.priceUSD,
+            providerCost,
           },
           400
         );
       }
 
-      /*
-       * Server-only Supabase client.
-       */
-      const adminClient =
-        createClient(
-          SUPABASE_URL,
-          SUPABASE_SERVICE_ROLE_KEY,
-          {
-            auth: {
-              persistSession: false,
-              autoRefreshToken: false,
-            },
-          }
-        );
+      console.log(
+        "5SIM PURCHASE PRICING:",
+        {
+          country,
+          operator,
+          product,
+          fiveSimPriceUSD:
+            pricing.priceUSD,
+          providerCostNGN:
+            providerCost,
+          profitNGN:
+            PROFIT_NGN,
+          customerPriceNGN:
+            amount,
+        }
+      );
 
       /*
-       * Check customer's wallet.
+       * ========================================
+       * CHECK CUSTOMER WALLET
+       * ========================================
        */
       const {
         data: wallet,
@@ -895,7 +911,9 @@ export async function GET(
       }
 
       /*
-       * Validate provider response.
+       * ========================================
+       * VALIDATE ACTIVATION
+       * ========================================
        */
       const fiveSimOrderId =
         Number(
@@ -928,17 +946,105 @@ export async function GET(
         );
       }
 
+      /*
+       * ========================================
+       * FINAL PROVIDER COST
+       * ========================================
+       *
+       * 5SIM may return the actual price
+       * inside the activation response.
+       *
+       * Always prefer the actual activation
+       * price when it is available.
+       */
+      const activationPriceUSD =
+        Number(
+          activation?.price ??
+            activation?.Price ??
+            activation?.cost ??
+            0
+        );
+
+      let finalProviderCost =
+        providerCost;
+
+      if (
+        Number.isFinite(
+          activationPriceUSD
+        ) &&
+        activationPriceUSD > 0
+      ) {
+        finalProviderCost =
+          Math.round(
+            activationPriceUSD *
+              USD_TO_NGN
+          );
+      }
+
+      /*
+       * ========================================
+       * FINAL CUSTOMER PRICE
+       * ========================================
+       *
+       * Provider cost + ₦700 profit.
+       */
+      const finalCustomerPrice =
+        Math.round(
+          finalProviderCost +
+            PROFIT_NGN
+        );
+
+      const finalProfit =
+        finalCustomerPrice -
+        finalProviderCost;
+
+      console.log(
+        "5SIM FINAL PURCHASE PRICING:",
+        {
+          country,
+          operator,
+          product,
+
+          productPriceUSD:
+            pricing.priceUSD,
+
+          activationPriceUSD,
+
+          providerCost:
+            finalProviderCost,
+
+          customerPrice:
+            finalCustomerPrice,
+
+          profit:
+            finalProfit,
+        }
+      );
+
+      /*
+       * IMPORTANT:
+       *
+       * We do NOT cancel merely because
+       * the provider price changed.
+       *
+       * The secure database RPC checks the
+       * wallet again using finalCustomerPrice.
+       *
+       * If the final amount is affordable,
+       * the purchase completes.
+       *
+       * If the final amount is too high,
+       * the RPC fails and the activation is
+       * cancelled below.
+       */
+
       const paymentReference =
         `purchase_${crypto.randomUUID()}`;
 
       /*
-       * Atomically:
-       *
-       * 1. Lock wallet
-       * 2. Check balance
-       * 3. Deduct money
-       * 4. Create order
-       * 5. Create wallet transaction
+       * ========================================
+       * COMPLETE LOCAL PURCHASE
+       * ========================================
        */
       const {
         data: result,
@@ -951,7 +1057,10 @@ export async function GET(
               auth.user.id,
 
             p_amount:
-              amount,
+              finalCustomerPrice,
+
+            p_provider_cost:
+              finalProviderCost,
 
             p_fivesim_order_id:
               fiveSimOrderId,
@@ -974,10 +1083,6 @@ export async function GET(
           }
         );
 
-      /*
-       * If local database completion fails,
-       * attempt provider cancellation.
-       */
       if (
         rpcError ||
         !result?.success
@@ -1003,16 +1108,134 @@ export async function GET(
           );
         }
 
+        let errorMessage =
+          "The 5SIM number was purchased, but we could not complete the local order.";
+
+        if (
+          rpcError?.message?.toLowerCase().includes(
+            "insufficient"
+          )
+        ) {
+          errorMessage =
+            "Your wallet balance is not enough for the final 5SIM price. The activation was cancelled and your balance was not charged.";
+        }
+
         return responseJSON(
           {
             success: false,
             error:
-              "The 5SIM number was purchased, but we could not complete the local order. The provider cancellation was attempted.",
+              errorMessage,
+          },
+          400
+        );
+      }
+
+      /*
+       * ========================================
+       * VALIDATE ORDER ID
+       * ========================================
+       */
+      const createdOrderId =
+        result?.order_id;
+
+      if (!createdOrderId) {
+        console.error(
+          "RPC DID NOT RETURN ORDER ID:",
+          result
+        );
+
+        return responseJSON(
+          {
+            success: false,
+            error:
+              "Purchase completed but the local order ID was not returned.",
           },
           500
         );
       }
 
+      /*
+       * ========================================
+       * SAFETY UPDATE
+       * ========================================
+       *
+       * Explicitly save the final 5SIM
+       * provider cost to the order.
+       */
+      const {
+        data: savedOrder,
+        error: providerCostUpdateError,
+      } =
+        await adminClient
+          .from("orders")
+          .update({
+            provider_cost:
+              finalProviderCost,
+          })
+          .eq(
+            "id",
+            createdOrderId
+          )
+          .select(
+            "id,amount,provider_cost"
+          )
+          .single();
+
+      if (providerCostUpdateError) {
+        console.error(
+          "PROVIDER COST SAVE ERROR:",
+          providerCostUpdateError
+        );
+
+        /*
+         * The provider has already been
+         * purchased and the wallet/order
+         * were already completed.
+         *
+         * Do NOT cancel here because doing
+         * so could create an inconsistent
+         * provider/database state.
+         */
+        return responseJSON(
+          {
+            success: false,
+            error:
+              "Purchase completed, but the 5SIM cost could not be saved to the order. Please contact support.",
+            orderId:
+              createdOrderId,
+          },
+          500
+        );
+      }
+
+      console.log(
+        "PROVIDER COST SAVED:",
+        {
+          orderId:
+            savedOrder?.id,
+
+          customerPrice:
+            savedOrder?.amount,
+
+          providerCost:
+            savedOrder?.provider_cost,
+
+          profit:
+            Number(
+              savedOrder?.amount || 0
+            ) -
+            Number(
+              savedOrder?.provider_cost ||
+                0
+            ),
+        }
+      );
+
+      /*
+       * ========================================
+       * SUCCESS
+       * ========================================
+       */
       return responseJSON({
         success: true,
 
@@ -1020,7 +1243,7 @@ export async function GET(
           "Number purchased successfully.",
 
         orderId:
-          result.order_id,
+          createdOrderId,
 
         transactionId:
           result.transaction_id,
@@ -1036,7 +1259,18 @@ export async function GET(
 
         product,
 
-        amount,
+        amount:
+          finalCustomerPrice,
+
+        providerCost:
+          finalProviderCost,
+
+        profit:
+          finalProfit,
+
+        providerCostUSD:
+          finalProviderCost /
+          USD_TO_NGN,
 
         status:
           activation?.status ||
@@ -1301,6 +1535,11 @@ export async function GET(
       });
     }
 
+    /*
+     * ========================================
+     * UNKNOWN ACTION
+     * ========================================
+     */
     return responseJSON(
       {
         success: false,

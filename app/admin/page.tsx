@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 
@@ -9,41 +8,40 @@ const ADMIN_EMAIL = "namoriki30@gmail.com";
 
 type Order = {
   id: string;
-  user_id?: string | null;
-  phone_number?: string | null;
-  number?: string | null;
-  country?: string | null;
-  operator?: string | null;
-  service?: string | null;
-  status?: string | null;
-  price?: number | null;
-  cost?: number | null;
-  profit?: number | null;
-  created_at?: string | null;
+  user_id: string;
+  phone_number: string | null;
+  country: string | null;
+  service: string | null;
+  status: string | null;
+  amount: number | null;
+  provider_cost: number | null;
+  created_at: string;
 };
 
 type Wallet = {
-  id: string;
   user_id: string;
-  balance?: number | null;
-  created_at?: string | null;
+  balance: number | null;
 };
 
 type Transaction = {
   id: string;
-  user_id?: string | null;
-  amount?: number | null;
-  type?: string | null;
-  status?: string | null;
-  description?: string | null;
-  created_at?: string | null;
+  user_id: string;
+  amount: number | null;
+  type: string | null;
+  status: string | null;
+  reference: string | null;
+  description: string | null;
+  created_at: string;
 };
 
-type Customer = {
-  user_id: string;
-  balance: number;
-  orders: number;
-  spent: number;
+type ProfitData = {
+  totalRevenue: number;
+  totalProviderCost: number;
+  totalProfit: number;
+  availableProfit: number;
+  ordersAnalyzed: number;
+  validOrders: number;
+  refundedOrders: number;
 };
 
 export default function AdminPage() {
@@ -52,230 +50,226 @@ export default function AdminPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+
+  const [profitData, setProfitData] =
+    useState<ProfitData>({
+      totalRevenue: 0,
+      totalProviderCost: 0,
+      totalProfit: 0,
+      availableProfit: 0,
+      ordersAnalyzed: 0,
+      validOrders: 0,
+      refundedOrders: 0,
+    });
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [transactionWarning, setTransactionWarning] = useState("");
-
-  const [stats, setStats] = useState({
-    totalOrders: 0,
-    totalBalance: 0,
-    totalRevenue: 0,
-    totalProfit: 0,
-    totalCustomers: 0,
-  });
+  const [message, setMessage] = useState("");
+  const [activeSection, setActiveSection] =
+    useState("overview");
 
   useEffect(() => {
-    loadAdminDashboard();
+    checkAdmin();
   }, []);
 
-  async function loadAdminDashboard() {
+  async function checkAdmin() {
     try {
-      setLoading(true);
-      setError("");
-      setTransactionWarning("");
-
       const {
         data: { user },
-        error: userError,
+        error,
       } = await supabase.auth.getUser();
 
-      /*
-       * =========================================================
-       * ADMIN AUTHENTICATION
-       * =========================================================
-       */
-
-      if (userError || !user) {
+      if (error || !user) {
         router.replace("/login");
         return;
       }
 
       if (
         !user.email ||
-        user.email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()
+        user.email.toLowerCase() !==
+          ADMIN_EMAIL.toLowerCase()
       ) {
         router.replace("/login");
         return;
       }
 
-      /*
-       * =========================================================
-       * LOAD ORDERS
-       * =========================================================
-       */
+      await loadDashboard();
+    } catch (error) {
+      console.error(
+        "ADMIN CHECK ERROR:",
+        error
+      );
 
+      router.replace("/login");
+    }
+  }
+
+  async function loadDashboard() {
+    setLoading(true);
+    setMessage("");
+
+    try {
       const {
-        data: orderData,
-        error: orderError,
-      } = await supabase
-        .from("orders")
-        .select("*")
-        .order("created_at", {
-          ascending: false,
-        })
-        .limit(100);
+        data: {
+          session,
+        },
+      } = await supabase.auth.getSession();
 
-      if (orderError) {
-        console.error("ORDERS ERROR:", orderError);
+      if (!session?.access_token) {
+        router.replace("/login");
+        return;
+      }
 
-        throw new Error(
-          "Unable to load orders. Check your orders table permissions."
+      const [
+        ordersResponse,
+        walletsResponse,
+        transactionsResponse,
+        profitResponse,
+      ] = await Promise.all([
+        supabase
+          .from("orders")
+          .select(
+            "id,user_id,phone_number,country,service,status,amount,provider_cost,created_at"
+          )
+          .order("created_at", {
+            ascending: false,
+          })
+          .limit(100),
+
+        supabase
+          .from("wallets")
+          .select(
+            "user_id,balance"
+          ),
+
+        supabase
+          .from("wallet_transactions")
+          .select(
+            "id,user_id,amount,type,status,reference,description,created_at"
+          )
+          .order("created_at", {
+            ascending: false,
+          })
+          .limit(100),
+
+        fetch("/api/admin/profit", {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          cache: "no-store",
+        }),
+      ]);
+
+      if (ordersResponse.error) {
+        console.error(
+          "ORDERS ERROR:",
+          ordersResponse.error
+        );
+
+        setMessage(
+          `Orders error: ${ordersResponse.error.message}`
         );
       }
 
-      /*
-       * =========================================================
-       * LOAD WALLETS
-       * =========================================================
-       */
-
-      const {
-        data: walletData,
-        error: walletError,
-      } = await supabase
-        .from("wallets")
-        .select("id, user_id, balance, created_at")
-        .limit(1000);
-
-      if (walletError) {
-        console.error("WALLETS ERROR:", walletError);
-
-        throw new Error(
-          "Unable to load wallets. Check your wallets table permissions."
+      if (walletsResponse.error) {
+        console.error(
+          "WALLETS ERROR:",
+          walletsResponse.error
         );
       }
 
-      /*
-       * =========================================================
-       * LOAD TRANSACTIONS
-       * =========================================================
-       */
+      if (transactionsResponse.error) {
+        console.error(
+          "TRANSACTIONS ERROR:",
+          transactionsResponse.error
+        );
+      }
 
-      const {
-        data: transactionData,
-        error: transactionError,
-      } = await supabase
-        .from("wallet_transactions")
-        .select(
-          "id, user_id, amount, type, status, description, created_at"
-        )
-        .order("created_at", {
-          ascending: false,
-        })
-        .limit(100);
+      if (!profitResponse.ok) {
+        const profitError =
+          await profitResponse.json().catch(
+            () => null
+          );
 
-      if (transactionError) {
-        console.warn(
-          "TRANSACTIONS COULD NOT BE LOADED:",
-          transactionError
+        console.error(
+          "PROFIT API ERROR:",
+          profitError
         );
 
-        setTransactionWarning(
-          "Wallet transactions are currently unavailable because of Supabase table permissions. Orders and customer information are still working."
+        setMessage(
+          profitError?.error ||
+            "Unable to load profit balance."
         );
-
-        setTransactions([]);
       } else {
-        setTransactions(
-          (transactionData || []) as Transaction[]
-        );
-      }
+        const profit =
+          (await profitResponse.json()) as ProfitData;
 
-      const safeOrders = (orderData || []) as Order[];
-      const safeWallets = (walletData || []) as Wallet[];
+        setProfitData({
+          totalRevenue:
+            Number(
+              profit.totalRevenue || 0
+            ),
 
-      setOrders(safeOrders);
-      setWallets(safeWallets);
+          totalProviderCost:
+            Number(
+              profit.totalProviderCost ||
+                0
+            ),
 
-      /*
-       * =========================================================
-       * CALCULATE STATISTICS
-       * =========================================================
-       */
+          totalProfit:
+            Number(
+              profit.totalProfit || 0
+            ),
 
-      const totalBalance = safeWallets.reduce(
-        (total, wallet) =>
-          total + Number(wallet.balance || 0),
-        0
-      );
+          availableProfit:
+            Number(
+              profit.availableProfit ||
+                0
+            ),
 
-      const totalRevenue = safeOrders.reduce(
-        (total, order) =>
-          total + Number(order.price || 0),
-        0
-      );
+          ordersAnalyzed:
+            Number(
+              profit.ordersAnalyzed ||
+                0
+            ),
 
-      const totalProfit = safeOrders.reduce(
-        (total, order) =>
-          total + Number(order.profit || 0),
-        0
-      );
+          validOrders:
+            Number(
+              profit.validOrders ||
+                0
+            ),
 
-      /*
-       * =========================================================
-       * BUILD CUSTOMER LIST
-       * =========================================================
-       */
-
-      const customerMap = new Map<string, Customer>();
-
-      for (const wallet of safeWallets) {
-        if (!wallet.user_id) {
-          continue;
-        }
-
-        customerMap.set(wallet.user_id, {
-          user_id: wallet.user_id,
-          balance: Number(wallet.balance || 0),
-          orders: 0,
-          spent: 0,
+          refundedOrders:
+            Number(
+              profit.refundedOrders ||
+                0
+            ),
         });
       }
 
-      for (const order of safeOrders) {
-        if (!order.user_id) {
-          continue;
-        }
+      setOrders(
+        (ordersResponse.data ||
+          []) as Order[]
+      );
 
-        const existing = customerMap.get(order.user_id);
+      setWallets(
+        (walletsResponse.data ||
+          []) as Wallet[]
+      );
 
-        if (existing) {
-          existing.orders += 1;
+      setTransactions(
+        (transactionsResponse.data ||
+          []) as Transaction[]
+      );
+    } catch (error) {
+      console.error(
+        "DASHBOARD LOAD ERROR:",
+        error
+      );
 
-          existing.spent += Number(
-            order.price || 0
-          );
-        } else {
-          customerMap.set(order.user_id, {
-            user_id: order.user_id,
-            balance: 0,
-            orders: 1,
-            spent: Number(order.price || 0),
-          });
-        }
-      }
-
-      const customerList = Array.from(
-        customerMap.values()
-      ).sort((a, b) => b.spent - a.spent);
-
-      setCustomers(customerList);
-
-      setStats({
-        totalOrders: safeOrders.length,
-        totalBalance,
-        totalRevenue,
-        totalProfit,
-        totalCustomers: customerList.length,
-      });
-    } catch (err) {
-      console.error("ADMIN DASHBOARD ERROR:", err);
-
-      setError(
-        err instanceof Error
-          ? err.message
+      setMessage(
+        error instanceof Error
+          ? error.message
           : "Unable to load admin dashboard."
       );
     } finally {
@@ -283,1070 +277,1550 @@ export default function AdminPage() {
     }
   }
 
-  function formatMoney(amount: number) {
-    return `₦${amount.toLocaleString("en-NG", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    })}`;
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.replace("/login");
   }
 
-  function formatDate(date?: string | null) {
-    if (!date) {
-      return "Unknown date";
-    }
+  const totalRevenue =
+    profitData.totalRevenue;
 
-    const parsed = new Date(date);
+  const totalProviderCost =
+    profitData.totalProviderCost;
 
-    if (Number.isNaN(parsed.getTime())) {
-      return "Unknown date";
-    }
+  const totalProfit =
+    profitData.totalProfit;
 
-    return parsed.toLocaleString("en-NG", {
-      dateStyle: "medium",
-      timeStyle: "short",
+  const availableProfit =
+    profitData.availableProfit;
+
+  const totalWalletBalance = useMemo(() => {
+    return wallets.reduce(
+      (total, wallet) => {
+        return (
+          total +
+          Number(
+            wallet.balance || 0
+          )
+        );
+      },
+      0
+    );
+  }, [wallets]);
+
+  const activeOrders = useMemo(() => {
+    return orders.filter((order) => {
+      const status = String(
+        order.status || ""
+      ).toLowerCase();
+
+      return (
+        status === "pending" ||
+        status === "active" ||
+        status === "received"
+      );
     });
+  }, [orders]);
+
+  const customerSpending =
+    totalRevenue;
+
+  function formatNGN(value: number) {
+    const numericValue = Number(value);
+
+    if (!Number.isFinite(numericValue)) {
+      return "NGN 0";
+    }
+
+    return `NGN ${numericValue.toLocaleString("en-NG")}`;
   }
 
-  function getPhoneNumber(order: Order) {
+  function formatDate(value: string) {
+    try {
+      return new Date(
+        value
+      ).toLocaleString("en-NG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+    } catch {
+      return value;
+    }
+  }
+
+  function getOrderPhone(order: Order) {
     return (
       order.phone_number ||
-      order.number ||
-      "Unavailable"
+      "N/A"
     );
   }
 
-  function getStatusClass(status?: string | null) {
-    const value = status?.toLowerCase() || "pending";
+  function getOrderProfit(order: Order) {
+    const amount =
+      Number(order.amount || 0);
 
-    if (
-      value === "completed" ||
-      value === "active" ||
-      value === "success" ||
-      value === "successful"
-    ) {
-      return "status success";
-    }
+    const providerCost =
+      Number(
+        order.provider_cost || 0
+      );
 
-    if (
-      value === "cancelled" ||
-      value === "canceled" ||
-      value === "failed"
-    ) {
-      return "status danger";
-    }
-
-    return "status pending";
+    return amount - providerCost;
   }
 
-  function isCredit(transaction: Transaction) {
-    const type = transaction.type?.toLowerCase();
-
-    return (
-      type === "deposit" ||
-      type === "fund" ||
-      type === "funding" ||
-      type === "credit" ||
-      type === "refund"
+  function goToCustomers() {
+    router.push(
+      "/admin/customers"
     );
   }
 
-  function shortUserId(userId: string) {
-    if (userId.length <= 18) {
-      return userId;
-    }
-
-    return `${userId.slice(0, 8)}...${userId.slice(-6)}`;
+  function goToSupport() {
+    router.push(
+      "/admin/support"
+    );
   }
 
   return (
-    <main className="page">
-      <style>{`
-        * {
-          box-sizing: border-box;
-        }
-
-        body {
-          margin: 0;
-          background: #020617;
-          font-family: Arial, sans-serif;
-        }
-
-        .page {
-          min-height: 100vh;
-          color: white;
-          background:
-            radial-gradient(
-              circle at top right,
-              rgba(33,150,243,.18),
-              transparent 35%
-            ),
-            linear-gradient(
-              135deg,
-              #020617,
-              #0f172a,
-              #020617
-            );
-        }
-
-        .header {
-          position: sticky;
-          top: 0;
-          z-index: 30;
-          border-bottom: 1px solid rgba(255,255,255,.08);
-          background: rgba(2,6,23,.95);
-          backdrop-filter: blur(14px);
-        }
-
-        .header-inner {
-          max-width: 1200px;
-          margin: auto;
-          padding: 18px 20px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 20px;
-        }
-
-        .logo {
-          color: white;
-          text-decoration: none;
-          font-size: 25px;
-          font-weight: 900;
-        }
-
-        .logo span {
-          color: #2196f3;
-        }
-
-        .header-right {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .back {
-          color: #94a3b8;
-          text-decoration: none;
-          font-size: 14px;
-          font-weight: 800;
-          padding: 10px 12px;
-          border-radius: 9px;
-          transition: .2s ease;
-        }
-
-        .back:hover {
-          color: white;
-          background: rgba(255,255,255,.06);
-        }
-
-        .customers-button,
-        .support-button {
-          color: white;
-          text-decoration: none;
-          font-size: 14px;
-          font-weight: 900;
-          padding: 10px 15px;
-          border-radius: 9px;
-          transition: .2s ease;
-        }
-
-        .customers-button {
-          background: rgba(33,150,243,.15);
-          border: 1px solid rgba(33,150,243,.35);
-        }
-
-        .customers-button:hover {
-          background: #2196f3;
-          border-color: #2196f3;
-        }
-
-        .support-button {
-          background: rgba(168,85,247,.15);
-          border: 1px solid rgba(168,85,247,.35);
-        }
-
-        .support-button:hover {
-          background: #9333ea;
-          border-color: #9333ea;
-        }
-
-        .refresh {
-          border: 0;
-          cursor: pointer;
-          padding: 10px 15px;
-          border-radius: 9px;
-          background: #2196f3;
-          color: white;
-          font-weight: 900;
-        }
-
-        .refresh:hover {
-          background: #1976d2;
-        }
-
-        .refresh:disabled {
-          opacity: .6;
-          cursor: not-allowed;
-        }
-
-        .container {
-          width: 100%;
-          max-width: 1200px;
-          margin: auto;
-          padding: 45px 20px 80px;
-        }
-
-        .hero {
-          margin-bottom: 30px;
-        }
-
-        .eyebrow {
-          color: #2196f3;
-          font-size: 12px;
-          font-weight: 900;
-          letter-spacing: 2px;
-        }
-
-        .hero h1 {
-          margin: 8px 0;
-          font-size: 42px;
-        }
-
-        .hero p {
-          margin: 0;
-          color: #94a3b8;
-        }
-
-        .stats {
-          display: grid;
-          grid-template-columns: repeat(5, 1fr);
-          gap: 15px;
-          margin-bottom: 30px;
-        }
-
-        .stat {
-          padding: 22px;
-          border-radius: 17px;
-          background: rgba(15,23,42,.95);
-          border: 1px solid rgba(255,255,255,.08);
-        }
-
-        .stat-label {
-          color: #64748b;
-          font-size: 11px;
-          font-weight: 800;
-          margin-bottom: 10px;
-        }
-
-        .stat-value {
-          font-size: 23px;
-          font-weight: 900;
-          word-break: break-word;
-        }
-
-        .blue {
-          color: #60a5fa;
-        }
-
-        .green {
-          color: #4ade80;
-        }
-
-        .purple {
-          color: #c084fc;
-        }
-
-        .orange {
-          color: #fb923c;
-        }
-
-        .red {
-          color: #f87171;
-        }
-
-        .section {
-          margin-top: 30px;
-        }
-
-        .section-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 15px;
-          margin-bottom: 15px;
-        }
-
-        .section-title {
-          font-size: 21px;
-          font-weight: 900;
-        }
-
-        .section-count {
-          color: #64748b;
-          font-size: 12px;
-          font-weight: 800;
-        }
-
-        .table-wrap {
-          overflow-x: auto;
-          border-radius: 16px;
-          border: 1px solid rgba(255,255,255,.08);
-          background: rgba(15,23,42,.95);
-        }
-
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          min-width: 850px;
-        }
-
-        th {
-          padding: 15px;
-          text-align: left;
-          color: #64748b;
-          font-size: 11px;
-          letter-spacing: .7px;
-          border-bottom: 1px solid rgba(255,255,255,.07);
-        }
-
-        td {
-          padding: 16px 15px;
-          color: #cbd5e1;
-          font-size: 13px;
-          border-bottom: 1px solid rgba(255,255,255,.05);
-        }
-
-        tr:last-child td {
-          border-bottom: none;
-        }
-
-        .number {
-          color: white;
-          font-weight: 900;
-        }
-
-        .muted {
-          color: #64748b;
-        }
-
-        .price {
-          color: #4ade80;
-          font-weight: 900;
-        }
-
-        .profit {
-          color: #60a5fa;
-          font-weight: 900;
-        }
-
-        .status {
-          display: inline-flex;
-          padding: 5px 9px;
-          border-radius: 999px;
-          font-size: 10px;
-          font-weight: 900;
-          text-transform: uppercase;
-        }
-
-        .status.success {
-          background: rgba(34,197,94,.12);
-          color: #4ade80;
-        }
-
-        .status.pending {
-          background: rgba(234,179,8,.12);
-          color: #facc15;
-        }
-
-        .status.danger {
-          background: rgba(239,68,68,.12);
-          color: #f87171;
-        }
-
-        .cards {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 20px;
-        }
-
-        .card {
-          overflow: hidden;
-          border-radius: 16px;
-          border: 1px solid rgba(255,255,255,.08);
-          background: rgba(15,23,42,.95);
-        }
-
-        .card-header {
-          padding: 18px 20px;
-          border-bottom: 1px solid rgba(255,255,255,.06);
-          font-size: 17px;
-          font-weight: 900;
-        }
-
-        .card-item {
-          padding: 17px 20px;
-          border-bottom: 1px solid rgba(255,255,255,.05);
-        }
-
-        .card-item:last-child {
-          border-bottom: none;
-        }
-
-        .item-top {
-          display: flex;
-          justify-content: space-between;
-          gap: 15px;
-        }
-
-        .item-title {
-          color: white;
-          font-weight: 800;
-          font-size: 14px;
-        }
-
-        .item-sub {
-          margin-top: 5px;
-          color: #64748b;
-          font-size: 11px;
-          word-break: break-all;
-        }
-
-        .item-amount {
-          text-align: right;
-          font-weight: 900;
-          white-space: nowrap;
-        }
-
-        .customer-card {
-          overflow-x: auto;
-          border-radius: 16px;
-          border: 1px solid rgba(255,255,255,.08);
-          background: rgba(15,23,42,.95);
-        }
-
-        .customer-row {
-          display: grid;
-          grid-template-columns: 2fr 1fr 1fr 1fr;
-          gap: 15px;
-          align-items: center;
-          padding: 17px 20px;
-          border-bottom: 1px solid rgba(255,255,255,.05);
-          min-width: 650px;
-        }
-
-        .customer-row:last-child {
-          border-bottom: none;
-        }
-
-        .customer-header {
-          color: #64748b;
-          font-size: 10px;
-          font-weight: 900;
-          letter-spacing: .7px;
-        }
-
-        .customer-user {
-          color: white;
-          font-size: 13px;
-          font-weight: 800;
-          word-break: break-all;
-        }
-
-        .customer-balance {
-          color: #4ade80;
-          font-weight: 900;
-        }
-
-        .customer-orders {
-          color: #c084fc;
-          font-weight: 900;
-        }
-
-        .customer-spent {
-          color: #60a5fa;
-          font-weight: 900;
-        }
-
-        .customer-link {
-          color: inherit;
-          text-decoration: none;
-          cursor: pointer;
-          transition:
-            background .2s ease,
-            transform .2s ease;
-        }
-
-        .customer-link:hover {
-          background: rgba(33,150,243,.08);
-        }
-
-        .customer-link:active {
-          background: rgba(33,150,243,.14);
-        }
-
-        .customer-open {
-          margin-top: 5px;
-          color: #2196f3;
-          font-size: 11px;
-          font-weight: 800;
-        }
-
-        .empty {
-          padding: 35px 20px;
-          text-align: center;
-          color: #64748b;
-        }
-
-        .error {
-          margin-bottom: 25px;
-          padding: 17px;
-          border-radius: 12px;
-          background: rgba(127,29,29,.3);
-          border: 1px solid rgba(248,113,113,.25);
-          color: #fecaca;
-        }
-
-        .warning {
-          margin-bottom: 25px;
-          padding: 15px 17px;
-          border-radius: 12px;
-          background: rgba(120,53,15,.25);
-          border: 1px solid rgba(251,191,36,.25);
-          color: #fde68a;
-          font-size: 13px;
-        }
-
-        .loading {
-          padding: 80px 20px;
-          text-align: center;
-          color: #94a3b8;
-        }
-
-        .footer-note {
-          margin-top: 35px;
-          color: #475569;
-          font-size: 12px;
-          text-align: center;
-        }
-
-        @media (max-width: 1050px) {
-          .stats {
-            grid-template-columns: repeat(3, 1fr);
-          }
-        }
-
-        @media (max-width: 900px) {
-          .cards {
-            grid-template-columns: 1fr;
-          }
-
-          .customer-row {
-            grid-template-columns: 2fr 1fr 1fr 1fr;
-          }
-        }
-
-        @media (max-width: 700px) {
-          .header-inner {
-            padding: 15px;
-          }
-
-          .header-right {
-            gap: 6px;
-          }
-
-          .back {
-            display: none;
-          }
-
-          .customers-button,
-          .support-button {
-            padding: 9px 10px;
-            font-size: 11px;
-          }
-
-          .refresh {
-            padding: 9px 12px;
-            font-size: 12px;
-          }
-
-          .container {
-            padding: 30px 15px 60px;
-          }
-
-          .hero h1 {
-            font-size: 34px;
-          }
-
-          .stats {
-            grid-template-columns: repeat(2, 1fr);
-          }
-
-          .stat {
-            padding: 18px;
-          }
-
-          .stat-value {
-            font-size: 20px;
-          }
-        }
-
-        @media (max-width: 430px) {
-          .logo {
-            font-size: 21px;
-          }
-
-          .stats {
-            grid-template-columns: 1fr;
-          }
-
-          .customers-button,
-          .support-button {
-            padding: 9px 8px;
-            font-size: 10px;
-          }
-
-          .refresh {
-            padding: 9px 10px;
-          }
-        }
-      `}</style>
-
-      <header className="header">
-        <div className="header-inner">
-          <Link
-            href="/"
-            className="logo"
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "#f5f7fb",
+        color: "#111827",
+        fontFamily:
+          "Arial, Helvetica, sans-serif",
+      }}
+    >
+      <header
+        style={{
+          background: "#111827",
+          color: "#ffffff",
+          padding: "18px 24px",
+          display: "flex",
+          justifyContent:
+            "space-between",
+          alignItems: "center",
+          gap: "20px",
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "24px",
+              fontWeight: 800,
+            }}
           >
-            Moriki <span>SMS</span>
-          </Link>
-
-          <div className="header-right">
-            <Link
-              href="/dashboard"
-              className="back"
-            >
-              ← Dashboard
-            </Link>
-
-            <Link
-              href="/admin/customers"
-              className="customers-button"
-            >
-              Customers
-            </Link>
-
-            <Link
-              href="/admin/support"
-              className="support-button"
-            >
-              Customer Support
-            </Link>
-
-            <button
-              className="refresh"
-              onClick={loadAdminDashboard}
-              disabled={loading}
-            >
-              ↻ Refresh
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <div className="container">
-        <section className="hero">
-          <div className="eyebrow">
-            MORIKI SMS ADMIN
-          </div>
-
-          <h1>
-            Admin Dashboard
+            Moriki SMS
           </h1>
 
-          <p>
-            Manage customers, orders,
-            wallets and business activity.
+          <p
+            style={{
+              margin:
+                "5px 0 0",
+              color: "#cbd5e1",
+              fontSize: "13px",
+            }}
+          >
+            Administrator Dashboard
           </p>
-        </section>
+        </div>
 
-        {error && (
-          <div className="error">
-            {error}
+        <button
+          onClick={handleLogout}
+          style={{
+            border:
+              "1px solid #475569",
+            background: "#1e293b",
+            color: "#ffffff",
+            padding:
+              "10px 16px",
+            borderRadius: "8px",
+            cursor: "pointer",
+            fontWeight: 700,
+          }}
+        >
+          Logout
+        </button>
+      </header>
+
+      <div
+        style={{
+          display: "flex",
+          minHeight:
+            "calc(100vh - 82px)",
+          flexWrap: "wrap",
+        }}
+      >
+        <aside
+          style={{
+            width: "250px",
+            background: "#ffffff",
+            borderRight:
+              "1px solid #e5e7eb",
+            padding: "20px",
+            boxSizing:
+              "border-box",
+          }}
+        >
+          <div
+            style={{
+              display: "grid",
+              gap: "8px",
+            }}
+          >
+            <button
+              onClick={() =>
+                setActiveSection(
+                  "overview"
+                )
+              }
+              style={navButtonStyle(
+                activeSection ===
+                  "overview"
+              )}
+            >
+              Overview
+            </button>
+
+            <button
+              onClick={() =>
+                setActiveSection(
+                  "orders"
+                )
+              }
+              style={navButtonStyle(
+                activeSection ===
+                  "orders"
+              )}
+            >
+              Orders
+            </button>
+
+            <button
+              onClick={() =>
+                setActiveSection(
+                  "transactions"
+                )
+              }
+              style={navButtonStyle(
+                activeSection ===
+                  "transactions"
+              )}
+            >
+              Transactions
+            </button>
+
+            <div
+              style={{
+                height: "1px",
+                background:
+                  "#e5e7eb",
+                margin:
+                  "10px 0",
+              }}
+            />
+
+            <button
+              onClick={
+                goToCustomers
+              }
+              style={navButtonStyle(
+                false
+              )}
+            >
+              Customers
+            </button>
+
+            <button
+              onClick={
+                goToSupport
+              }
+              style={navButtonStyle(
+                false
+              )}
+            >
+              Customer Support
+            </button>
           </div>
-        )}
 
-        {transactionWarning && (
-          <div className="warning">
-            {transactionWarning}
+          <div
+            style={{
+              marginTop: "30px",
+              padding: "14px",
+              background:
+                "#f8fafc",
+              border:
+                "1px solid #e5e7eb",
+              borderRadius:
+                "10px",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "12px",
+                color: "#64748b",
+                marginBottom:
+                  "6px",
+              }}
+            >
+              Customer Wallet Funds
+            </div>
+
+            <div
+              style={{
+                fontSize: "18px",
+                fontWeight: 800,
+              }}
+            >
+              {formatNGN(
+                totalWalletBalance
+              )}
+            </div>
           </div>
-        )}
+        </aside>
 
-        {loading ? (
-          <div className="loading">
-            Loading admin dashboard...
+        <section
+          style={{
+            flex: 1,
+            padding: "24px",
+            minWidth: 0,
+            boxSizing:
+              "border-box",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent:
+                "space-between",
+              alignItems:
+                "center",
+              gap: "15px",
+              marginBottom:
+                "24px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: "25px",
+                }}
+              >
+                {activeSection ===
+                "overview"
+                  ? "Overview"
+                  : activeSection ===
+                    "orders"
+                  ? "Orders"
+                  : "Transactions"}
+              </h2>
+
+              <p
+                style={{
+                  margin:
+                    "6px 0 0",
+                  color: "#64748b",
+                  fontSize: "14px",
+                }}
+              >
+                Monitor your Moriki SMS business.
+              </p>
+            </div>
+
+            <button
+              onClick={
+                loadDashboard
+              }
+              disabled={loading}
+              style={{
+                border:
+                  "1px solid #d1d5db",
+                background:
+                  "#ffffff",
+                padding:
+                  "10px 15px",
+                borderRadius:
+                  "8px",
+                cursor: loading
+                  ? "not-allowed"
+                  : "pointer",
+                fontWeight: 700,
+              }}
+            >
+              {loading
+                ? "Refreshing..."
+                : "Refresh"}
+            </button>
           </div>
-        ) : (
-          <>
-            <section className="stats">
-              <div className="stat">
-                <div className="stat-label">
-                  TOTAL CUSTOMERS
-                </div>
 
-                <div className="stat-value purple">
-                  {stats.totalCustomers.toLocaleString()}
-                </div>
-              </div>
+          {message && (
+            <div
+              style={{
+                background:
+                  "#fef2f2",
+                border:
+                  "1px solid #fecaca",
+                color: "#991b1b",
+                padding: "13px",
+                borderRadius:
+                  "9px",
+                marginBottom:
+                  "20px",
+              }}
+            >
+              {message}
+            </div>
+          )}
 
-              <div className="stat">
-                <div className="stat-label">
-                  TOTAL ORDERS
-                </div>
-
-                <div className="stat-value purple">
-                  {stats.totalOrders.toLocaleString()}
-                </div>
-              </div>
-
-              <div className="stat">
-                <div className="stat-label">
-                  USER WALLET BALANCE
-                </div>
-
-                <div className="stat-value green">
-                  {formatMoney(
-                    stats.totalBalance
-                  )}
-                </div>
-              </div>
-
-              <div className="stat">
-                <div className="stat-label">
-                  TOTAL REVENUE
-                </div>
-
-                <div className="stat-value orange">
-                  {formatMoney(
-                    stats.totalRevenue
-                  )}
-                </div>
-              </div>
-
-              <div className="stat">
-                <div className="stat-label">
-                  TOTAL PROFIT
-                </div>
-
-                <div className="stat-value blue">
-                  {formatMoney(
-                    stats.totalProfit
-                  )}
-                </div>
-              </div>
-            </section>
-
-            <section className="section">
-              <div className="section-header">
-                <div className="section-title">
-                  Customer Management
-                </div>
-
-                <div className="section-count">
-                  {customers.length} customers
-                </div>
-              </div>
-
-              <div className="customer-card">
-                {customers.length === 0 ? (
-                  <div className="empty">
-                    No customers found.
-                  </div>
-                ) : (
-                  <>
-                    <div className="customer-row">
-                      <div className="customer-header">
-                        CUSTOMER
-                      </div>
-
-                      <div className="customer-header">
-                        BALANCE
-                      </div>
-
-                      <div className="customer-header">
-                        ORDERS
-                      </div>
-
-                      <div className="customer-header">
-                        TOTAL SPENT
-                      </div>
+          {loading ? (
+            <div
+              style={{
+                background:
+                  "#ffffff",
+                border:
+                  "1px solid #e5e7eb",
+                borderRadius:
+                  "12px",
+                padding:
+                  "30px",
+                textAlign:
+                  "center",
+              }}
+            >
+              Loading dashboard...
+            </div>
+          ) : (
+            <>
+              {activeSection ===
+                "overview" && (
+                <>
+                  <div
+                    style={{
+                      background:
+                        "#111827",
+                      color:
+                        "#ffffff",
+                      borderRadius:
+                        "16px",
+                      padding:
+                        "22px",
+                      marginBottom:
+                        "20px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize:
+                          "13px",
+                        color:
+                          "#cbd5e1",
+                        marginBottom:
+                          "6px",
+                      }}
+                    >
+                      Admin Profit Balance
                     </div>
 
-                    {customers
-                      .slice(0, 50)
-                      .map((customer) => (
-                        <Link
-                          href={`/admin/customers/${encodeURIComponent(
-                            customer.user_id
-                          )}`}
-                          className="customer-row customer-link"
-                          key={customer.user_id}
+                    <div
+                      style={{
+                        fontSize:
+                          "34px",
+                        fontWeight:
+                          900,
+                        marginBottom:
+                          "5px",
+                      }}
+                    >
+                      {formatNGN(
+                        availableProfit
+                      )}
+                    </div>
+
+                    <div
+                      style={{
+                        fontSize:
+                          "12px",
+                        color:
+                          "#94a3b8",
+                      }}
+                    >
+                      Available profit from valid number sales
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display:
+                        "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(210px, 1fr))",
+                      gap: "16px",
+                      marginBottom:
+                        "24px",
+                    }}
+                  >
+                    <ProfitCard
+                      title="Total Revenue"
+                      value={formatNGN(
+                        totalRevenue
+                      )}
+                      description="All valid customer sales"
+                    />
+
+                    <ProfitCard
+                      title="Total 5SIM Cost"
+                      value={formatNGN(
+                        totalProviderCost
+                      )}
+                      description="All recorded 5SIM costs"
+                    />
+
+                    <ProfitCard
+                      title="Your Profit"
+                      value={formatNGN(
+                        totalProfit
+                      )}
+                      description="Revenue minus 5SIM cost"
+                    />
+
+                    <ProfitCard
+                      title="Available Profit"
+                      value={formatNGN(
+                        availableProfit
+                      )}
+                      description="After refunds and cancellations"
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      background:
+                        "#ffffff",
+                      border:
+                        "1px solid #e5e7eb",
+                      borderRadius:
+                        "12px",
+                      padding:
+                        "15px 18px",
+                      marginBottom:
+                        "24px",
+                      display:
+                        "flex",
+                      gap: "25px",
+                      flexWrap:
+                        "wrap",
+                      color:
+                        "#64748b",
+                      fontSize:
+                        "13px",
+                    }}
+                  >
+                    <span>
+                      Orders analyzed:{" "}
+                      <strong
+                        style={{
+                          color:
+                            "#111827",
+                        }}
+                      >
+                        {profitData.ordersAnalyzed.toLocaleString()}
+                      </strong>
+                    </span>
+
+                    <span>
+                      Valid orders:{" "}
+                      <strong
+                        style={{
+                          color:
+                            "#111827",
+                        }}
+                      >
+                        {profitData.validOrders.toLocaleString()}
+                      </strong>
+                    </span>
+
+                    <span>
+                      Refunded/cancelled:{" "}
+                      <strong
+                        style={{
+                          color:
+                            "#111827",
+                        }}
+                      >
+                        {profitData.refundedOrders.toLocaleString()}
+                      </strong>
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      display:
+                        "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(190px, 1fr))",
+                      gap: "16px",
+                      marginBottom:
+                        "24px",
+                    }}
+                  >
+                    <StatCard
+                      title="Total Orders"
+                      value={String(
+                        orders.length
+                      )}
+                      description="Recent orders shown"
+                    />
+
+                    <StatCard
+                      title="Active Orders"
+                      value={String(
+                        activeOrders.length
+                      )}
+                      description="Pending or active"
+                    />
+
+                    <StatCard
+                      title="Wallet Funds"
+                      value={formatNGN(
+                        totalWalletBalance
+                      )}
+                      description="Customer balances"
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      display:
+                        "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(220px, 1fr))",
+                      gap: "16px",
+                      marginBottom:
+                        "24px",
+                    }}
+                  >
+                    <QuickAction
+                      title="Customers"
+                      description="View and manage customer accounts"
+                      onClick={
+                        goToCustomers
+                      }
+                    />
+
+                    <QuickAction
+                      title="Customer Support"
+                      description="View and reply to customer complaints"
+                      onClick={
+                        goToSupport
+                      }
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      background:
+                        "#ffffff",
+                      border:
+                        "1px solid #e5e7eb",
+                      borderRadius:
+                        "12px",
+                      padding:
+                        "20px",
+                      marginBottom:
+                        "24px",
+                    }}
+                  >
+                    <h3
+                      style={{
+                        marginTop: 0,
+                        marginBottom:
+                          "16px",
+                      }}
+                    >
+                      Profit Summary
+                    </h3>
+
+                    <div
+                      style={{
+                        display:
+                          "grid",
+                        gridTemplateColumns:
+                          "repeat(auto-fit, minmax(200px, 1fr))",
+                        gap: "15px",
+                      }}
+                    >
+                      <SummaryBox
+                        label="Customer Spending"
+                        value={formatNGN(
+                          customerSpending
+                        )}
+                      />
+
+                      <SummaryBox
+                        label="5SIM Provider Cost"
+                        value={formatNGN(
+                          totalProviderCost
+                        )}
+                      />
+
+                      <SummaryBox
+                        label="Your Profit"
+                        value={formatNGN(
+                          totalProfit
+                        )}
+                      />
+
+                      <SummaryBox
+                        label="Available Profit"
+                        value={formatNGN(
+                          availableProfit
+                        )}
+                      />
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background:
+                        "#ffffff",
+                      border:
+                        "1px solid #e5e7eb",
+                      borderRadius:
+                        "12px",
+                      overflow:
+                        "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        padding:
+                          "18px 20px",
+                        borderBottom:
+                          "1px solid #e5e7eb",
+                      }}
+                    >
+                      <h3
+                        style={{
+                          margin: 0,
+                        }}
+                      >
+                        Recent Orders
+                      </h3>
+                    </div>
+
+                    <OrderTable
+                      orders={orders.slice(
+                        0,
+                        10
+                      )}
+                      formatNGN={
+                        formatNGN
+                      }
+                      formatDate={
+                        formatDate
+                      }
+                      getOrderPhone={
+                        getOrderPhone
+                      }
+                      getOrderProfit={
+                        getOrderProfit
+                      }
+                    />
+                  </div>
+                </>
+              )}
+
+              {activeSection ===
+                "orders" && (
+                <div
+                  style={{
+                    background:
+                      "#ffffff",
+                    border:
+                      "1px solid #e5e7eb",
+                    borderRadius:
+                      "12px",
+                    overflow:
+                      "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      padding:
+                        "18px 20px",
+                      borderBottom:
+                        "1px solid #e5e7eb",
+                    }}
+                  >
+                    <h3
+                      style={{
+                        margin: 0,
+                      }}
+                    >
+                      All Orders
+                    </h3>
+                  </div>
+
+                  <OrderTable
+                    orders={orders}
+                    formatNGN={
+                      formatNGN
+                    }
+                    formatDate={
+                      formatDate
+                    }
+                    getOrderPhone={
+                      getOrderPhone
+                    }
+                    getOrderProfit={
+                      getOrderProfit
+                    }
+                  />
+                </div>
+              )}
+
+              {activeSection ===
+                "transactions" && (
+                <div
+                  style={{
+                    background:
+                      "#ffffff",
+                    border:
+                      "1px solid #e5e7eb",
+                    borderRadius:
+                      "12px",
+                    overflow:
+                      "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      padding:
+                        "18px 20px",
+                      borderBottom:
+                        "1px solid #e5e7eb",
+                    }}
+                  >
+                    <h3
+                      style={{
+                        margin: 0,
+                      }}
+                    >
+                      Wallet Transactions
+                    </h3>
+                  </div>
+
+                  <div
+                    style={{
+                      overflowX:
+                        "auto",
+                    }}
+                  >
+                    <table
+                      style={{
+                        width:
+                          "100%",
+                        borderCollapse:
+                          "collapse",
+                        minWidth:
+                          "850px",
+                      }}
+                    >
+                      <thead>
+                        <tr
+                          style={{
+                            background:
+                              "#f8fafc",
+                          }}
                         >
-                          <div>
-                            <div className="customer-user">
-                              {shortUserId(
-                                customer.user_id
-                              )}
-                            </div>
-
-                            <div className="customer-open">
-                              View customer →
-                            </div>
-                          </div>
-
-                          <div className="customer-balance">
-                            {formatMoney(
-                              customer.balance
-                            )}
-                          </div>
-
-                          <div className="customer-orders">
-                            {customer.orders}
-                          </div>
-
-                          <div className="customer-spent">
-                            {formatMoney(
-                              customer.spent
-                            )}
-                          </div>
-                        </Link>
-                      ))}
-                  </>
-                )}
-              </div>
-            </section>
-
-            <section className="section">
-              <div className="section-header">
-                <div className="section-title">
-                  Recent Orders
-                </div>
-
-                <div className="section-count">
-                  {orders.length} loaded
-                </div>
-              </div>
-
-              <div className="table-wrap">
-                {orders.length === 0 ? (
-                  <div className="empty">
-                    No orders found.
-                  </div>
-                ) : (
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>NUMBER</th>
-                        <th>COUNTRY</th>
-                        <th>SERVICE</th>
-                        <th>STATUS</th>
-                        <th>PRICE</th>
-                        <th>PROFIT</th>
-                        <th>DATE</th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {orders
-                        .slice(0, 20)
-                        .map((order) => (
-                          <tr key={order.id}>
-                            <td>
-                              <div className="number">
-                                {getPhoneNumber(
-                                  order
-                                )}
-                              </div>
-                            </td>
-
-                            <td>
-                              {order.country ||
-                                "Unknown"}
-                            </td>
-
-                            <td>
-                              {order.service ||
-                                "Unknown"}
-                            </td>
-
-                            <td>
-                              <span
-                                className={getStatusClass(
-                                  order.status
-                                )}
-                              >
-                                {order.status ||
-                                  "pending"}
-                              </span>
-                            </td>
-
-                            <td>
-                              <span className="price">
-                                {formatMoney(
-                                  Number(
-                                    order.price ||
-                                      0
-                                  )
-                                )}
-                              </span>
-                            </td>
-
-                            <td>
-                              <span className="profit">
-                                {formatMoney(
-                                  Number(
-                                    order.profit ||
-                                      0
-                                  )
-                                )}
-                              </span>
-                            </td>
-
-                            <td className="muted">
-                              {formatDate(
-                                order.created_at
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </section>
-
-            <section className="section">
-              <div className="cards">
-                <div className="card">
-                  <div className="card-header">
-                    Recent Wallet Activity
-                  </div>
-
-                  {transactions.length === 0 ? (
-                    <div className="empty">
-                      Wallet transaction
-                      information is not
-                      currently available.
-                    </div>
-                  ) : (
-                    transactions
-                      .slice(0, 8)
-                      .map((transaction) => {
-                        const amount =
-                          Number(
-                            transaction.amount ||
-                              0
-                          );
-
-                        const credit =
-                          isCredit(
-                            transaction
-                          );
-
-                        return (
-                          <div
-                            className="card-item"
-                            key={
-                              transaction.id
+                          <th
+                            style={
+                              thStyle
                             }
                           >
-                            <div className="item-top">
-                              <div>
-                                <div className="item-title">
-                                  {transaction.description ||
-                                    transaction.type ||
-                                    "Wallet transaction"}
-                                </div>
+                            Date
+                          </th>
 
-                                <div className="item-sub">
+                          <th
+                            style={
+                              thStyle
+                            }
+                          >
+                            Type
+                          </th>
+
+                          <th
+                            style={
+                              thStyle
+                            }
+                          >
+                            Amount
+                          </th>
+
+                          <th
+                            style={
+                              thStyle
+                            }
+                          >
+                            Status
+                          </th>
+
+                          <th
+                            style={
+                              thStyle
+                            }
+                          >
+                            Reference
+                          </th>
+
+                          <th
+                            style={
+                              thStyle
+                            }
+                          >
+                            Description
+                          </th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {transactions.length ===
+                        0 ? (
+                          <tr>
+                            <td
+                              colSpan={6}
+                              style={{
+                                padding:
+                                  "30px",
+                                textAlign:
+                                  "center",
+                                color:
+                                  "#64748b",
+                              }}
+                            >
+                              No transactions found.
+                            </td>
+                          </tr>
+                        ) : (
+                          transactions.map(
+                            (
+                              transaction
+                            ) => (
+                              <tr
+                                key={
+                                  transaction.id
+                                }
+                              >
+                                <td
+                                  style={
+                                    tdStyle
+                                  }
+                                >
                                   {formatDate(
                                     transaction.created_at
                                   )}
-                                </div>
-                              </div>
+                                </td>
 
-                              <div
-                                className={`item-amount ${
-                                  credit
-                                    ? "green"
-                                    : "red"
-                                }`}
-                              >
-                                {credit
-                                  ? "+"
-                                  : "-"}
-                                {formatMoney(
-                                  Math.abs(
-                                    amount
-                                  )
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                  )}
-                </div>
+                                <td
+                                  style={
+                                    tdStyle
+                                  }
+                                >
+                                  {transaction.type ||
+                                    "N/A"}
+                                </td>
 
-                <div className="card">
-                  <div className="card-header">
-                    User Wallets
+                                <td
+                                  style={{
+                                    ...tdStyle,
+                                    fontWeight:
+                                      800,
+                                  }}
+                                >
+                                  {formatNGN(
+                                    Number(
+                                      transaction.amount ||
+                                        0
+                                    )
+                                  )}
+                                </td>
+
+                                <td
+                                  style={
+                                    tdStyle
+                                  }
+                                >
+                                  {transaction.status ||
+                                    "N/A"}
+                                </td>
+
+                                <td
+                                  style={
+                                    tdStyle
+                                  }
+                                >
+                                  {transaction.reference ||
+                                    "N/A"}
+                                </td>
+
+                                <td
+                                  style={
+                                    tdStyle
+                                  }
+                                >
+                                  {transaction.description ||
+                                    "N/A"}
+                                </td>
+                              </tr>
+                            )
+                          )
+                        )}
+                      </tbody>
+                    </table>
                   </div>
-
-                  {wallets.length === 0 ? (
-                    <div className="empty">
-                      No wallets found.
-                    </div>
-                  ) : (
-                    wallets
-                      .slice(0, 8)
-                      .map((wallet) => (
-                        <div
-                          className="card-item"
-                          key={wallet.id}
-                        >
-                          <div className="item-top">
-                            <div>
-                              <div className="item-title">
-                                Customer
-                              </div>
-
-                              <div className="item-sub">
-                                {wallet.user_id}
-                              </div>
-                            </div>
-
-                            <div className="item-amount blue">
-                              {formatMoney(
-                                Number(
-                                  wallet.balance ||
-                                    0
-                                )
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                  )}
                 </div>
-              </div>
-            </section>
-
-            <div className="footer-note">
-              Moriki SMS Admin Dashboard
-            </div>
-          </>
-        )}
+              )}
+            </>
+          )}
+        </section>
       </div>
     </main>
   );
 }
+
+function navButtonStyle(
+  active: boolean
+): React.CSSProperties {
+  return {
+    width: "100%",
+    textAlign: "left",
+    border: "none",
+    padding: "12px",
+    borderRadius: "8px",
+    cursor: "pointer",
+    background: active
+      ? "#111827"
+      : "#f3f4f6",
+    color: active
+      ? "#ffffff"
+      : "#111827",
+    fontWeight: 700,
+  };
+}
+
+function QuickAction({
+  title,
+  description,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        textAlign: "left",
+        border:
+          "1px solid #e5e7eb",
+        background:
+          "#ffffff",
+        borderRadius:
+          "12px",
+        padding: "20px",
+        cursor: "pointer",
+      }}
+    >
+      <div
+        style={{
+          fontSize:
+            "18px",
+          fontWeight: 800,
+          marginBottom:
+            "7px",
+        }}
+      >
+        {title}
+      </div>
+
+      <div
+        style={{
+          color: "#64748b",
+          fontSize:
+            "13px",
+        }}
+      >
+        {description}
+      </div>
+    </button>
+  );
+}
+
+function ProfitCard({
+  title,
+  value,
+  description,
+}: {
+  title: string;
+  value: string;
+  description: string;
+}) {
+  return (
+    <div
+      style={{
+        background:
+          "#ffffff",
+        border:
+          "1px solid #e5e7eb",
+        borderRadius:
+          "12px",
+        padding:
+          "20px",
+      }}
+    >
+      <div
+        style={{
+          color:
+            "#64748b",
+          fontSize:
+            "13px",
+          marginBottom:
+            "8px",
+        }}
+      >
+        {title}
+      </div>
+
+      <div
+        style={{
+          fontSize:
+            "25px",
+          fontWeight:
+            900,
+          marginBottom:
+            "6px",
+        }}
+      >
+        {value}
+      </div>
+
+      <div
+        style={{
+          color:
+            "#94a3b8",
+          fontSize:
+            "12px",
+        }}
+      >
+        {description}
+      </div>
+    </div>
+  );
+}
+
+function StatCard({
+  title,
+  value,
+  description,
+}: {
+  title: string;
+  value: string;
+  description: string;
+}) {
+  return (
+    <div
+      style={{
+        background:
+          "#ffffff",
+        border:
+          "1px solid #e5e7eb",
+        borderRadius:
+          "12px",
+        padding:
+          "18px",
+      }}
+    >
+      <div
+        style={{
+          color:
+            "#64748b",
+          fontSize:
+            "13px",
+          marginBottom:
+            "8px",
+        }}
+      >
+        {title}
+      </div>
+
+      <div
+        style={{
+          fontSize:
+            "24px",
+          fontWeight:
+            800,
+          marginBottom:
+            "5px",
+        }}
+      >
+        {value}
+      </div>
+
+      <div
+        style={{
+          color:
+            "#94a3b8",
+          fontSize:
+            "12px",
+        }}
+      >
+        {description}
+      </div>
+    </div>
+  );
+}
+
+function SummaryBox({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div
+      style={{
+        background:
+          "#f8fafc",
+        border:
+          "1px solid #e5e7eb",
+        borderRadius:
+          "10px",
+        padding:
+          "16px",
+      }}
+    >
+      <div
+        style={{
+          color:
+            "#64748b",
+          fontSize:
+            "12px",
+          marginBottom:
+            "7px",
+        }}
+      >
+        {label}
+      </div>
+
+      <div
+        style={{
+          fontSize:
+            "20px",
+          fontWeight:
+            800,
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function OrderTable({
+  orders,
+  formatNGN,
+  formatDate,
+  getOrderPhone,
+  getOrderProfit,
+}: {
+  orders: Order[];
+  formatNGN: (
+    value: number
+  ) => string;
+  formatDate: (
+    value: string
+  ) => string;
+  getOrderPhone: (
+    order: Order
+  ) => string;
+  getOrderProfit: (
+    order: Order
+  ) => number;
+}) {
+  return (
+    <div
+      style={{
+        overflowX:
+          "auto",
+      }}
+    >
+      <table
+        style={{
+          width:
+            "100%",
+          borderCollapse:
+            "collapse",
+          minWidth:
+            "1050px",
+        }}
+      >
+        <thead>
+          <tr
+            style={{
+              background:
+                "#f8fafc",
+            }}
+          >
+            <th
+              style={
+                thStyle
+              }
+            >
+              Date
+            </th>
+
+            <th
+              style={
+                thStyle
+              }
+            >
+              Country
+            </th>
+
+            <th
+              style={
+                thStyle
+              }
+            >
+              Service
+            </th>
+
+            <th
+              style={
+                thStyle
+              }
+            >
+              Number
+            </th>
+
+            <th
+              style={
+                thStyle
+              }
+            >
+              Status
+            </th>
+
+            <th
+              style={
+                thStyle
+              }
+            >
+              Customer Price
+            </th>
+
+            <th
+              style={
+                thStyle
+              }
+            >
+              5SIM Cost
+            </th>
+
+            <th
+              style={
+                thStyle
+              }
+            >
+              Profit
+            </th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {orders.length ===
+          0 ? (
+            <tr>
+              <td
+                colSpan={8}
+                style={{
+                  padding:
+                    "30px",
+                  textAlign:
+                    "center",
+                  color:
+                    "#64748b",
+                }}
+              >
+                No orders found.
+              </td>
+            </tr>
+          ) : (
+            orders.map(
+              (order) => {
+                const amount =
+                  Number(
+                    order.amount ||
+                      0
+                  );
+
+                const providerCost =
+                  Number(
+                    order.provider_cost ||
+                      0
+                  );
+
+                const profit =
+                  getOrderProfit(
+                    order
+                  );
+
+                return (
+                  <tr
+                    key={
+                      order.id
+                    }
+                  >
+                    <td
+                      style={
+                        tdStyle
+                      }
+                    >
+                      {formatDate(
+                        order.created_at
+                      )}
+                    </td>
+
+                    <td
+                      style={
+                        tdStyle
+                      }
+                    >
+                      {order.country ||
+                        "N/A"}
+                    </td>
+
+                    <td
+                      style={
+                        tdStyle
+                      }
+                    >
+                      {order.service ||
+                        "N/A"}
+                    </td>
+
+                    <td
+                      style={{
+                        ...tdStyle,
+                        fontWeight:
+                          700,
+                      }}
+                    >
+                      {getOrderPhone(
+                        order
+                      )}
+                    </td>
+
+                    <td
+                      style={
+                        tdStyle
+                      }
+                    >
+                      <span
+                        style={{
+                          display:
+                            "inline-block",
+                          padding:
+                            "5px 9px",
+                          borderRadius:
+                            "999px",
+                          background:
+                            "#f1f5f9",
+                          fontSize:
+                            "12px",
+                          fontWeight:
+                            700,
+                        }}
+                      >
+                        {order.status ||
+                          "N/A"}
+                      </span>
+                    </td>
+
+                    <td
+                      style={{
+                        ...tdStyle,
+                        fontWeight:
+                          800,
+                      }}
+                    >
+                      {formatNGN(
+                        amount
+                      )}
+                    </td>
+
+                    <td
+                      style={
+                        tdStyle
+                      }
+                    >
+                      {formatNGN(
+                        providerCost
+                      )}
+                    </td>
+
+                    <td
+                      style={{
+                        ...tdStyle,
+                        fontWeight:
+                          800,
+                      }}
+                    >
+                      {formatNGN(
+                        profit
+                      )}
+                    </td>
+                  </tr>
+                );
+              }
+            )
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const thStyle: React.CSSProperties =
+  {
+    padding:
+      "13px 14px",
+    textAlign:
+      "left",
+    fontSize:
+      "12px",
+    color:
+      "#64748b",
+    borderBottom:
+      "1px solid #e5e7eb",
+    whiteSpace:
+      "nowrap",
+  };
+
+const tdStyle: React.CSSProperties =
+  {
+    padding:
+      "14px",
+    borderBottom:
+      "1px solid #f1f5f9",
+    fontSize:
+      "13px",
+    whiteSpace:
+      "nowrap",
+  };
+
+

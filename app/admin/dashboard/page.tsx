@@ -60,7 +60,6 @@ export default function CustomerDashboard() {
 
     setUserName(fullName);
 
-    // Load wallet
     const { data: walletData, error: walletError } =
       await supabase
         .from("wallets")
@@ -78,7 +77,6 @@ export default function CustomerDashboard() {
       setBalance(0);
     }
 
-    // Load customer's orders
     const { data: orderData, error: orderError } =
       await supabase
         .from("orders")
@@ -98,7 +96,6 @@ export default function CustomerDashboard() {
 
     setOrders(customerOrders);
 
-    // Count active numbers
     const active = customerOrders.filter((order) => {
       const status =
         order.status ||
@@ -155,6 +152,17 @@ export default function CustomerDashboard() {
       .replace(/\b\w/g, (letter) =>
         letter.toUpperCase()
       );
+  }
+
+  function openWhatsApp() {
+    const message =
+      "Hello Moriki SMS, I need help with my account/order.";
+
+    const url = `https://wa.me/2349041518544?text=${encodeURIComponent(
+      message
+    )}`;
+
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   if (loading) {
@@ -340,7 +348,6 @@ export default function CustomerDashboard() {
           </div>
         )}
 
-        {/* Balance */}
         <div
           style={{
             marginBottom: "25px",
@@ -388,7 +395,6 @@ export default function CustomerDashboard() {
           </button>
         </div>
 
-        {/* Stats */}
         <div
           style={{
             display: "grid",
@@ -618,9 +624,45 @@ export default function CustomerDashboard() {
               Contact Moriki SMS support.
             </p>
           </button>
+
+          {/* WhatsApp Customer Care */}
+          <button
+            onClick={openWhatsApp}
+            style={{
+              textAlign: "left",
+              padding: "24px",
+              borderRadius: "16px",
+              border: "1px solid #1e293b",
+              background: "#0f172a",
+              color: "#ffffff",
+              cursor: "pointer",
+            }}
+          >
+            <div style={{ fontSize: "30px" }}>
+              WhatsApp
+            </div>
+
+            <h3
+              style={{
+                margin: "15px 0 5px",
+                fontSize: "18px",
+              }}
+            >
+              WhatsApp Support
+            </h3>
+
+            <p
+              style={{
+                margin: 0,
+                color: "#64748b",
+                fontSize: "14px",
+              }}
+            >
+              Chat with Moriki SMS support on WhatsApp.
+            </p>
+          </button>
         </div>
 
-        {/* Recent orders */}
         <section
           style={{
             borderRadius: "18px",
