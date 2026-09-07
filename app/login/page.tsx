@@ -10,12 +10,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState<
-    "error" | "success"
-  >("error");
-
   const [loading, setLoading] = useState(false);
-  const [forgotLoading, setForgotLoading] = useState(false);
 
   async function handleLogin(
     e: React.FormEvent<HTMLFormElement>
@@ -24,7 +19,6 @@ export default function LoginPage() {
     e.stopPropagation();
 
     setMessage("");
-    setMessageType("error");
 
     const cleanEmail = email.trim();
 
@@ -41,89 +35,65 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      console.log("=== LOGIN DIAGNOSTIC START ===");
+      console.log("Supabase URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
+      console.log(
+        "Publishable key exists:",
+        !!process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+      );
+      console.log("Email:", cleanEmail);
+
       const { data, error } =
         await supabase.auth.signInWithPassword({
           email: cleanEmail,
           password,
         });
 
+      console.log("LOGIN DATA:", data);
+      console.log("LOGIN ERROR:", error);
+      console.log("LOGIN ERROR CODE:", error?.code);
+      console.log("LOGIN ERROR STATUS:", error?.status);
+      console.log("LOGIN ERROR MESSAGE:", error?.message);
+      console.log("=== LOGIN DIAGNOSTIC END ===");
+
       if (error) {
-        console.error("LOGIN ERROR:", error);
-        setMessage(error.message);
+        setMessage(
+          `LOGIN ERROR\n\nCode: ${
+            error.code || "none"
+          }\n\nStatus: ${
+            error.status || "none"
+          }\n\nMessage: ${
+            error.message
+          }`
+        );
         return;
       }
 
       if (!data.user || !data.session) {
-        setMessage("Login failed. Please try again.");
+        setMessage(
+          "Login returned no user/session. Check the browser console."
+        );
         return;
       }
 
-      // Never put credentials in the URL.
-      // Navigate only after Supabase authentication succeeds.
+      setMessage("Login successful. Redirecting...");
+
       router.replace("/admin/dashboard");
     } catch (error) {
-      console.error("LOGIN ERROR:", error);
-
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Something went wrong while logging in."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleForgotPassword() {
-    setMessage("");
-    setMessageType("error");
-
-    const cleanEmail = email.trim();
-
-    if (!cleanEmail) {
-      setMessage(
-        "Enter your email address first, then click Forgot password."
-      );
-      return;
-    }
-
-    setForgotLoading(true);
-
-    try {
-      const redirectTo =
-        `${window.location.origin}/reset-password`;
-
-      const { error } =
-        await supabase.auth.resetPasswordForEmail(
-          cleanEmail,
-          {
-            redirectTo,
-          }
-        );
-
-      if (error) {
-        setMessage(error.message);
-        return;
-      }
-
-      setMessageType("success");
-
-      setMessage(
-        "Password reset email sent. Check your email and follow the link to create a new password."
-      );
-    } catch (error) {
       console.error(
-        "PASSWORD RESET ERROR:",
+        "LOGIN DIAGNOSTIC CATCH:",
         error
       );
 
       setMessage(
-        error instanceof Error
-          ? error.message
-          : "Something went wrong."
+        `LOGIN EXCEPTION\n\n${
+          error instanceof Error
+            ? error.message
+            : String(error)
+        }`
       );
     } finally {
-      setForgotLoading(false);
+      setLoading(false);
     }
   }
 
@@ -180,11 +150,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <form
-          method="post"
-          action="#"
-          onSubmit={handleLogin}
-        >
+        <form onSubmit={handleLogin}>
           <label
             htmlFor="email"
             style={{
@@ -198,7 +164,6 @@ export default function LoginPage() {
 
           <input
             id="email"
-            name="email"
             type="email"
             autoComplete="email"
             placeholder="Enter your email"
@@ -206,9 +171,7 @@ export default function LoginPage() {
             onChange={(e) =>
               setEmail(e.target.value)
             }
-            disabled={
-              loading || forgotLoading
-            }
+            disabled={loading}
             style={{
               width: "100%",
               boxSizing: "border-box",
@@ -236,7 +199,6 @@ export default function LoginPage() {
 
           <input
             id="password"
-            name="password"
             type="password"
             autoComplete="current-password"
             placeholder="Enter your password"
@@ -244,9 +206,7 @@ export default function LoginPage() {
             onChange={(e) =>
               setPassword(e.target.value)
             }
-            disabled={
-              loading || forgotLoading
-            }
+            disabled={loading}
             style={{
               width: "100%",
               boxSizing: "border-box",
@@ -260,93 +220,50 @@ export default function LoginPage() {
             }}
           />
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              marginTop: "10px",
-            }}
-          >
-            <button
-              type="button"
-              onClick={handleForgotPassword}
-              disabled={
-                loading || forgotLoading
-              }
-              style={{
-                border: "none",
-                background: "transparent",
-                color: "#60a5fa",
-                fontSize: "14px",
-                fontWeight: "600",
-                cursor:
-                  loading || forgotLoading
-                    ? "not-allowed"
-                    : "pointer",
-                padding: "4px 0",
-              }}
-            >
-              {forgotLoading
-                ? "Sending..."
-                : "Forgot password?"}
-            </button>
-          </div>
-
           <button
             type="submit"
-            disabled={
-              loading || forgotLoading
-            }
+            disabled={loading}
             style={{
               width: "100%",
               marginTop: "20px",
               padding: "15px",
               border: "none",
               borderRadius: "10px",
-              background:
-                loading || forgotLoading
-                  ? "#475569"
-                  : "#2563eb",
+              background: loading
+                ? "#475569"
+                : "#2563eb",
               color: "#ffffff",
               fontSize: "16px",
               fontWeight: "700",
-              cursor:
-                loading || forgotLoading
-                  ? "not-allowed"
-                  : "pointer",
+              cursor: loading
+                ? "not-allowed"
+                : "pointer",
             }}
           >
             {loading
-              ? "Logging in..."
+              ? "Checking..."
               : "Login"}
           </button>
         </form>
 
         {message && (
-          <div
+          <pre
             style={{
               marginTop: "20px",
-              padding: "12px",
+              padding: "14px",
               borderRadius: "10px",
-              background:
-                messageType === "success"
-                  ? "#052e16"
-                  : "#020617",
-              color:
-                messageType === "success"
-                  ? "#4ade80"
-                  : "#f87171",
-              border:
-                messageType === "success"
-                  ? "1px solid #166534"
-                  : "1px solid #1e293b",
-              textAlign: "center",
-              lineHeight: "1.5",
+              background: "#020617",
+              color: "#f87171",
+              border: "1px solid #334155",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              fontFamily: "Arial, sans-serif",
               fontSize: "14px",
+              lineHeight: "1.5",
             }}
           >
             {message}
-          </div>
+          </pre>
         )}
 
         <p
