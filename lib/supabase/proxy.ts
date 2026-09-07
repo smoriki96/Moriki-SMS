@@ -30,11 +30,7 @@ export async function updateSession(request: NextRequest) {
 
           cookiesToSet.forEach(
             ({ name, value, options }) => {
-              response.cookies.set(
-                name,
-                value,
-                options
-              );
+              response.cookies.set(name, value, options);
             }
           );
         },
@@ -42,15 +38,6 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  /*
-   * IMPORTANT:
-   * getClaims() can return data: null.
-   * Therefore we must NOT do:
-   *
-   * data: { claims }
-   *
-   * because that crashes when data is null.
-   */
   const { data, error } =
     await supabase.auth.getClaims();
 
@@ -59,40 +46,16 @@ export async function updateSession(request: NextRequest) {
   const pathname =
     request.nextUrl.pathname;
 
-  /*
-   * Customer dashboard
-   *
-   * /admin/dashboard is the CUSTOMER dashboard
-   * in Moriki SMS, so it must NOT be treated
-   * as an admin-only page.
-   */
-  const isCustomerDashboard =
-    pathname === "/admin/dashboard" ||
-    pathname.startsWith(
-      "/admin/dashboard/"
-    );
-
-  /*
-   * Actual admin-only areas.
-   */
   const isAdminArea =
     pathname === "/admin" ||
     pathname === "/admin/customers" ||
-    pathname.startsWith(
-      "/admin/customers/"
-    ) ||
+    pathname.startsWith("/admin/customers/") ||
     pathname === "/admin/support" ||
-    pathname.startsWith(
-      "/admin/support/"
-    );
+    pathname.startsWith("/admin/support/") ||
+    pathname === "/admin/dashboard" ||
+    pathname.startsWith("/admin/dashboard/");
 
-  /*
-   * Protect admin pages.
-   */
-  if (
-    isAdminArea &&
-    !isCustomerDashboard
-  ) {
+  if (isAdminArea) {
     const email =
       typeof claims?.email === "string"
         ? claims.email
@@ -100,10 +63,7 @@ export async function updateSession(request: NextRequest) {
 
     if (!email) {
       return NextResponse.redirect(
-        new URL(
-          "/login",
-          request.url
-        )
+        new URL("/login", request.url)
       );
     }
 
@@ -112,10 +72,7 @@ export async function updateSession(request: NextRequest) {
       ADMIN_EMAIL.toLowerCase()
     ) {
       return NextResponse.redirect(
-        new URL(
-          "/login",
-          request.url
-        )
+        new URL("/login", request.url)
       );
     }
   }

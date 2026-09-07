@@ -10,6 +10,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState<"error" | "success">("error");
   const [loading, setLoading] = useState(false);
 
   async function handleLogin(
@@ -19,6 +20,7 @@ export default function LoginPage() {
     e.stopPropagation();
 
     setMessage("");
+    setMessageType("error");
 
     const cleanEmail = email.trim();
 
@@ -35,62 +37,41 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      console.log("=== LOGIN DIAGNOSTIC START ===");
-      console.log("Supabase URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
-      console.log(
-        "Publishable key exists:",
-        !!process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-      );
-      console.log("Email:", cleanEmail);
-
       const { data, error } =
         await supabase.auth.signInWithPassword({
           email: cleanEmail,
           password,
         });
 
-      console.log("LOGIN DATA:", data);
-      console.log("LOGIN ERROR:", error);
-      console.log("LOGIN ERROR CODE:", error?.code);
-      console.log("LOGIN ERROR STATUS:", error?.status);
-      console.log("LOGIN ERROR MESSAGE:", error?.message);
-      console.log("=== LOGIN DIAGNOSTIC END ===");
-
       if (error) {
-        setMessage(
-          `LOGIN ERROR\n\nCode: ${
-            error.code || "none"
-          }\n\nStatus: ${
-            error.status || "none"
-          }\n\nMessage: ${
-            error.message
-          }`
-        );
+        console.error("LOGIN ERROR:", error);
+        setMessage(error.message);
         return;
       }
 
       if (!data.user || !data.session) {
-        setMessage(
-          "Login returned no user/session. Check the browser console."
-        );
+        setMessage("Login failed. Please try again.");
         return;
       }
 
+      setMessageType("success");
       setMessage("Login successful. Redirecting...");
 
-      router.replace("/admin/dashboard");
+      /*
+       * All normal login accounts go to the
+       * customer dashboard.
+       *
+       * Admin access is protected separately
+       * by the server-side proxy.
+       */
+      router.replace("/dashboard");
     } catch (error) {
-      console.error(
-        "LOGIN DIAGNOSTIC CATCH:",
-        error
-      );
+      console.error("LOGIN ERROR:", error);
 
       setMessage(
-        `LOGIN EXCEPTION\n\n${
-          error instanceof Error
-            ? error.message
-            : String(error)
-        }`
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while logging in."
       );
     } finally {
       setLoading(false);
@@ -168,9 +149,7 @@ export default function LoginPage() {
             autoComplete="email"
             placeholder="Enter your email"
             value={email}
-            onChange={(e) =>
-              setEmail(e.target.value)
-            }
+            onChange={(e) => setEmail(e.target.value)}
             disabled={loading}
             style={{
               width: "100%",
@@ -203,9 +182,7 @@ export default function LoginPage() {
             autoComplete="current-password"
             placeholder="Enter your password"
             value={password}
-            onChange={(e) =>
-              setPassword(e.target.value)
-            }
+            onChange={(e) => setPassword(e.target.value)}
             disabled={loading}
             style={{
               width: "100%",
@@ -229,41 +206,35 @@ export default function LoginPage() {
               padding: "15px",
               border: "none",
               borderRadius: "10px",
-              background: loading
-                ? "#475569"
-                : "#2563eb",
+              background: loading ? "#475569" : "#2563eb",
               color: "#ffffff",
               fontSize: "16px",
               fontWeight: "700",
-              cursor: loading
-                ? "not-allowed"
-                : "pointer",
+              cursor: loading ? "not-allowed" : "pointer",
             }}
           >
-            {loading
-              ? "Checking..."
-              : "Login"}
+            {loading ? "Checking..." : "Login"}
           </button>
         </form>
 
         {message && (
-          <pre
+          <div
             style={{
               marginTop: "20px",
               padding: "14px",
               borderRadius: "10px",
               background: "#020617",
-              color: "#f87171",
+              color:
+                messageType === "success"
+                  ? "#4ade80"
+                  : "#f87171",
               border: "1px solid #334155",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              fontFamily: "Arial, sans-serif",
               fontSize: "14px",
               lineHeight: "1.5",
             }}
           >
             {message}
-          </pre>
+          </div>
         )}
 
         <p
