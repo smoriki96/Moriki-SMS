@@ -4,6 +4,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import {
@@ -21,14 +22,14 @@ type SmsMessage = {
 
 type Order = {
   id: string;
-  country?: string;
-  service?: string;
-  phone_number?: string;
-  status?: string;
-  order_status?: string;
-  amount?: number;
+  country?: string | null;
+  service?: string | null;
+  phone_number?: string | null;
+  status?: string | null;
+  order_status?: string | null;
+  amount?: number | null;
   fivesim_order_id?: number | null;
-  created_at?: string;
+  created_at?: string | null;
 };
 
 function ActivationContent() {
@@ -37,183 +38,298 @@ function ActivationContent() {
 
   const orderId = searchParams.get("id");
 
-  const [order, setOrder] = useState<Order | null>(null);
-  const [sms, setSms] = useState<SmsMessage[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [checking, setChecking] = useState(false);
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
+  const [order, setOrder] =
+    useState<Order | null>(null);
 
-  const loadOrder = useCallback(async () => {
-    if (!orderId) {
-      setError("No order ID was provided.");
-      setLoading(false);
-      return;
-    }
+  const [sms, setSms] =
+    useState<SmsMessage[]>([]);
 
-    try {
-      setError("");
+  const [loading, setLoading] =
+    useState(true);
 
-      const {
+  const [checking, setChecking] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
+
+  const [message, setMessage] =
+    useState("");
+
+  const checkRunning =
+    useRef(false);
+
+  const getSession = useCallback(
+    async () => {
+      let {
         data: { session },
       } = await supabase.auth.getSession();
 
       if (!session?.access_token) {
+        const {
+          data: refreshData,
+        } =
+          await supabase.auth.refreshSession();
+
+        session = refreshData.session;
+      }
+
+      return session;
+    },
+    []
+  );
+
+  const loadOrder = useCallback(
+    async () => {
+      if (!orderId) {
         setError(
-          "Your session has expired. Please log in again."
+          "No order ID was provided."
         );
         setLoading(false);
         return;
       }
 
-      const response = await fetch(
-        `/api/orders/${encodeURIComponent(orderId)}`,
-        {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          cache: "no-store",
+      try {
+        setError("");
+
+        const session =
+          await getSession();
+
+        if (!session?.access_token) {
+          setError(
+            "Your session has expired. Please log in again."
+          );
+          setLoading(false);
+          return;
         }
-      );
 
-      const result = await response.json();
+        const response =
+          await fetch(
+            `/api/orders/${encodeURIComponent(
+              orderId
+            )}`,
+            {
+              method: "GET",
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+                Accept:
+                  "application/json",
+              },
+              cache: "no-store",
+            }
+          );
 
-      if (!response.ok) {
-        throw new Error(
-          result?.error ||
-            "Unable to load this activation."
+        const contentType =
+          response.headers.get(
+            "content-type"
+          ) || "";
+
+        if (
+          !contentType.includes(
+            "application/json"
+          )
+        ) {
+          throw new Error(
+            "The server returned an invalid response."
+          );
+        }
+
+        const result =
+          await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            result?.error ||
+              "Unable to load this activation."
+          );
+        }
+
+        setOrder(result.order);
+      } catch (err) {
+        console.error(
+          "Activation load error:",
+          err
         );
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load activation."
+        );
+      } finally {
+        setLoading(false);
       }
+    },
+    [orderId, getSession]
+  );
 
-      setOrder(result.order);
-    } catch (err) {
-      console.error("Activation error:", err);
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to load activation."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [orderId]);
-
-  const checkFiveSim = useCallback(async () => {
-    if (!orderId) return;
-
-    try {
-      setChecking(true);
-      setMessage("");
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) {
-        setError("Your session has expired.");
+  const checkFiveSim =
+    useCallback(async () => {
+      if (
+        !orderId ||
+        checkRunning.current
+      ) {
         return;
       }
 
-      const response = await fetch(
-        `/api/5sim?action=check&orderId=${encodeURIComponent(
-          orderId
-        )}`,
-        {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          cache: "no-store",
+      checkRunning.current = true;
+      setChecking(true);
+      setMessage("");
+
+      try {
+        const session =
+          await getSession();
+
+        if (!session?.access_token) {
+          setError(
+            "Your session has expired. Please log in again."
+          );
+          return;
         }
-      );
 
-      const result = await response.json();
+        const response =
+          await fetch(
+            `/api/5sim?action=check&orderId=${encodeURIComponent(
+              orderId
+            )}`,
+            {
+              method: "GET",
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+                Accept:
+                  "application/json",
+              },
+              cache: "no-store",
+            }
+          );
 
-      if (!response.ok) {
-        throw new Error(
-          result?.error ||
-            "Unable to check activation."
+        const contentType =
+          response.headers.get(
+            "content-type"
+          ) || "";
+
+        if (
+          !contentType.includes(
+            "application/json"
+          )
+        ) {
+          throw new Error(
+            "The server returned an invalid response."
+          );
+        }
+
+        const result =
+          await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            result?.error ||
+              "Unable to check activation."
+          );
+        }
+
+        if (result.phone) {
+          setOrder(
+            (previous) =>
+              previous
+                ? {
+                    ...previous,
+                    phone_number:
+                      result.phone,
+                    country:
+                      result.country ||
+                      previous.country,
+                    service:
+                      result.service ||
+                      previous.service,
+                    status:
+                      result.status ||
+                      previous.status,
+                    fivesim_order_id:
+                      result.fivesim_order_id ||
+                      previous.fivesim_order_id,
+                  }
+                : previous
+          );
+        }
+
+        if (
+          Array.isArray(result.sms)
+        ) {
+          setSms(result.sms);
+        }
+
+        if (result.status) {
+          const smsReceived =
+            Array.isArray(
+              result.sms
+            ) &&
+            result.sms.length > 0;
+
+          setMessage(
+            smsReceived
+              ? "SMS received successfully."
+              : `Activation status: ${result.status}`
+          );
+        }
+      } catch (err) {
+        console.error(
+          "5SIM check error:",
+          err
         );
-      }
 
-      if (result.phone) {
-        setOrder((previous) =>
-          previous
-            ? {
-                ...previous,
-                phone_number:
-                  result.phone,
-                country:
-                  result.country ||
-                  previous.country,
-                service:
-                  result.service ||
-                  previous.service,
-                status:
-                  result.status ||
-                  previous.status,
-                fivesim_order_id:
-                  result.fivesim_order_id ||
-                  previous.fivesim_order_id,
-              }
-            : previous
-        );
-      }
-
-      if (Array.isArray(result.sms)) {
-        setSms(result.sms);
-      }
-
-      if (result.status) {
         setMessage(
-          result.sms?.length
-            ? "SMS received successfully."
-            : `Activation status: ${result.status}`
+          err instanceof Error
+            ? err.message
+            : "Unable to check activation."
         );
-      }
-    } catch (err) {
-      console.error(
-        "5SIM check error:",
-        err
-      );
+      } finally {
+        checkRunning.current =
+          false;
 
-      setMessage(
-        err instanceof Error
-          ? err.message
-          : "Unable to check activation."
-      );
-    } finally {
-      setChecking(false);
-    }
-  }, [orderId]);
+        setChecking(false);
+      }
+    }, [orderId, getSession]);
 
   useEffect(() => {
     loadOrder();
   }, [loadOrder]);
 
   useEffect(() => {
-    if (!order?.fivesim_order_id) {
+    if (
+      !order?.fivesim_order_id
+    ) {
       return;
     }
 
     checkFiveSim();
 
-    const interval = setInterval(() => {
-      checkFiveSim();
-    }, 10000);
+    const interval =
+      setInterval(() => {
+        checkFiveSim();
+      }, 10000);
 
-    return () => clearInterval(interval);
+    return () =>
+      clearInterval(interval);
   }, [
     order?.fivesim_order_id,
     checkFiveSim,
   ]);
 
-  const copyCode = async (value: string) => {
+  const copyValue = async (
+    value: string,
+    successMessage: string
+  ) => {
     try {
-      await navigator.clipboard.writeText(value);
-      setMessage("Copied successfully.");
+      await navigator.clipboard.writeText(
+        value
+      );
+
+      setMessage(successMessage);
     } catch {
-      setMessage("Unable to copy.");
+      setMessage(
+        "Unable to copy. Please copy it manually."
+      );
     }
   };
 
@@ -227,14 +343,36 @@ function ActivationContent() {
 
   const isReceived =
     sms.length > 0 ||
-    normalizedStatus === "received";
+    normalizedStatus ===
+      "received";
 
   const isFinished =
-    normalizedStatus === "finished";
+    normalizedStatus ===
+    "finished";
 
   const isCanceled =
-    normalizedStatus === "canceled" ||
-    normalizedStatus === "cancelled";
+    normalizedStatus ===
+      "canceled" ||
+    normalizedStatus ===
+      "cancelled";
+
+  const statusText =
+    isReceived
+      ? "SMS Received"
+      : isFinished
+      ? "Completed"
+      : isCanceled
+      ? "Canceled"
+      : "Waiting for SMS";
+
+  const statusBadge =
+    isReceived
+      ? "Received"
+      : isFinished
+      ? "Finished"
+      : isCanceled
+      ? "Canceled"
+      : "Pending";
 
   if (loading) {
     return (
@@ -242,12 +380,12 @@ function ActivationContent() {
         <header className="border-b border-white/10 bg-slate-950">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-5 sm:px-6">
             <button
-              onClick={() => router.push("/")}
+              onClick={() =>
+                router.push("/")
+              }
               className="text-xl font-bold tracking-tight"
             >
-              <span className="text-white">
-                Moriki
-              </span>{" "}
+              Moriki{" "}
               <span className="text-cyan-400">
                 SMS
               </span>
@@ -255,7 +393,9 @@ function ActivationContent() {
 
             <button
               onClick={() =>
-                router.push("/numbers")
+                router.push(
+                  "/numbers"
+                )
               }
               className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 transition hover:bg-white/5 hover:text-white"
             >
@@ -288,10 +428,12 @@ function ActivationContent() {
         <header className="border-b border-white/10 bg-slate-950">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-5 sm:px-6">
             <button
-              onClick={() => router.push("/")}
-              className="text-xl font-bold"
+              onClick={() =>
+                router.push("/")
+              }
+              className="text-xl font-bold tracking-tight"
             >
-              <span>Moriki</span>{" "}
+              Moriki{" "}
               <span className="text-cyan-400">
                 SMS
               </span>
@@ -299,11 +441,13 @@ function ActivationContent() {
 
             <button
               onClick={() =>
-                router.push("/numbers")
+                router.push(
+                  "/dashboard"
+                )
               }
-              className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 hover:bg-white/5 hover:text-white"
+              className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 transition hover:bg-white/5 hover:text-white"
             >
-              Numbers
+              Dashboard
             </button>
           </div>
         </header>
@@ -332,11 +476,13 @@ function ActivationContent() {
 
               <button
                 onClick={() =>
-                  router.push("/numbers")
+                  router.push(
+                    "/dashboard"
+                  )
                 }
                 className="rounded-xl border border-white/10 px-5 py-3 font-semibold text-white transition hover:bg-white/5"
               >
-                Back to Numbers
+                Dashboard
               </button>
             </div>
           </div>
@@ -350,12 +496,12 @@ function ActivationContent() {
       <header className="sticky top-0 z-30 border-b border-white/10 bg-slate-950/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
           <button
-            onClick={() => router.push("/")}
+            onClick={() =>
+              router.push("/")
+            }
             className="text-xl font-bold tracking-tight"
           >
-            <span className="text-white">
-              Moriki
-            </span>{" "}
+            Moriki{" "}
             <span className="text-cyan-400">
               SMS
             </span>
@@ -364,16 +510,20 @@ function ActivationContent() {
           <div className="flex items-center gap-2 sm:gap-3">
             <button
               onClick={() =>
-                router.push("/admin/dashboard")
+                router.push(
+                  "/dashboard"
+                )
               }
-              className="hidden rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 transition hover:bg-white/5 hover:text-white sm:block"
+              className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 transition hover:bg-white/5 hover:text-white"
             >
               Dashboard
             </button>
 
             <button
               onClick={() =>
-                router.push("/numbers")
+                router.push(
+                  "/numbers"
+                )
               }
               className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-cyan-400"
             >
@@ -395,9 +545,8 @@ function ActivationContent() {
           </h1>
 
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400 sm:text-base">
-            Your verification SMS will appear
-            here automatically. Keep this page
-            open while waiting for the message.
+            Keep this page open while waiting
+            for your verification SMS.
           </p>
         </div>
 
@@ -436,9 +585,10 @@ function ActivationContent() {
                   {order?.phone_number && (
                     <button
                       onClick={() =>
-                        copyCode(
+                        copyValue(
                           order.phone_number ||
-                            ""
+                            "",
+                          "Phone number copied."
                         )
                       }
                       className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
@@ -456,7 +606,8 @@ function ActivationContent() {
                   </p>
 
                   <p className="mt-2 font-semibold text-white">
-                    {order?.country || "—"}
+                    {order?.country ||
+                      "Unknown"}
                   </p>
                 </div>
 
@@ -466,7 +617,8 @@ function ActivationContent() {
                   </p>
 
                   <p className="mt-2 font-semibold text-white">
-                    {order?.service || "—"}
+                    {order?.service ||
+                      "Unknown"}
                   </p>
                 </div>
               </div>
@@ -479,13 +631,7 @@ function ActivationContent() {
                     </p>
 
                     <p className="mt-2 font-semibold text-white">
-                      {isReceived
-                        ? "SMS Received"
-                        : isFinished
-                        ? "Completed"
-                        : isCanceled
-                        ? "Canceled"
-                        : "Waiting for SMS"}
+                      {statusText}
                     </p>
                   </div>
 
@@ -501,7 +647,7 @@ function ActivationContent() {
                     }`}
                   >
                     <span
-                      className={`h-1.5 w-1.5 ${
+                      className={`h-1.5 w-1.5 rounded-full ${
                         isReceived
                           ? "bg-emerald-400"
                           : isCanceled
@@ -509,19 +655,26 @@ function ActivationContent() {
                           : isFinished
                           ? "bg-blue-400"
                           : "animate-pulse bg-amber-400"
-                      } rounded-full`}
+                      }`}
                     />
 
-                    {isReceived
-                      ? "Received"
-                      : isCanceled
-                      ? "Canceled"
-                      : isFinished
-                      ? "Finished"
-                      : "Pending"}
+                    {statusBadge}
                   </span>
                 </div>
               </div>
+
+              <button
+                onClick={checkFiveSim}
+                disabled={
+                  checking ||
+                  !order?.fivesim_order_id
+                }
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {checking
+                  ? "Checking activation..."
+                  : "Refresh activation"}
+              </button>
             </div>
           </div>
 
@@ -575,61 +728,64 @@ function ActivationContent() {
                     </div>
                   ) : (
                     <div className="mt-6 rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-xs leading-5 text-amber-400">
-                      This is an old test order
-                      and is not connected to a
-                      5SIM activation.
+                      This order is not connected
+                      to a 5SIM activation.
                     </div>
                   )}
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {sms.map((item, index) => (
-                    <div
-                      key={`${item.created_at || "sms"}-${index}`}
-                      className="rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-5"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="text-xs uppercase tracking-wider text-slate-500">
-                            Sender
-                          </p>
+                  {sms.map(
+                    (item, index) => (
+                      <div
+                        key={`${item.created_at || "sms"}-${index}`}
+                        className="rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-5"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-xs uppercase tracking-wider text-slate-500">
+                              Sender
+                            </p>
 
-                          <p className="mt-1 font-semibold text-white">
-                            {item.sender ||
-                              "Unknown sender"}
+                            <p className="mt-1 font-semibold text-white">
+                              {item.sender ||
+                                "Unknown sender"}
+                            </p>
+                          </div>
+
+                          {item.code && (
+                            <button
+                              onClick={() =>
+                                copyValue(
+                                  item.code ||
+                                    "",
+                                  "Verification code copied."
+                                )
+                              }
+                              className="rounded-xl bg-emerald-400 px-4 py-2.5 text-lg font-bold tracking-wider text-slate-950 transition hover:bg-emerald-300"
+                            >
+                              {item.code}
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="mt-4 rounded-xl border border-white/5 bg-black/20 p-4">
+                          <p className="text-sm leading-6 text-slate-200">
+                            {item.text ||
+                              "No message text"}
                           </p>
                         </div>
 
-                        {item.code && (
-                          <button
-                            onClick={() =>
-                              copyCode(
-                                item.code || ""
-                              )
-                            }
-                            className="rounded-xl bg-emerald-400 px-4 py-2.5 text-lg font-bold tracking-wider text-slate-950 transition hover:bg-emerald-300"
-                          >
-                            {item.code}
-                          </button>
+                        {item.created_at && (
+                          <p className="mt-3 text-xs text-slate-500">
+                            {new Date(
+                              item.created_at
+                            ).toLocaleString()}
+                          </p>
                         )}
                       </div>
-
-                      <div className="mt-4 rounded-xl border border-white/5 bg-black/20 p-4">
-                        <p className="text-sm leading-6 text-slate-200">
-                          {item.text ||
-                            "No message text"}
-                        </p>
-                      </div>
-
-                      {item.created_at && (
-                        <p className="mt-3 text-xs text-slate-500">
-                          {new Date(
-                            item.created_at
-                          ).toLocaleString()}
-                        </p>
-                      )}
-                    </div>
-                  ))}
+                    )
+                  )}
                 </div>
               )}
 
@@ -643,7 +799,7 @@ function ActivationContent() {
         </div>
 
         <div className="mt-6 rounded-3xl border border-white/10 bg-white/[0.03] p-5">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                 Order ID
@@ -654,14 +810,29 @@ function ActivationContent() {
               </p>
             </div>
 
-            <button
-              onClick={() =>
-                router.push("/numbers")
-              }
-              className="rounded-xl border border-white/10 px-5 py-2.5 text-sm font-semibold text-slate-300 transition hover:bg-white/5 hover:text-white"
-            >
-              ← Get another number
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                onClick={() =>
+                  router.push(
+                    "/orders"
+                  )
+                }
+                className="rounded-xl border border-white/10 px-5 py-2.5 text-sm font-semibold text-slate-300 transition hover:bg-white/5 hover:text-white"
+              >
+                ← My Orders
+              </button>
+
+              <button
+                onClick={() =>
+                  router.push(
+                    "/numbers"
+                  )
+                }
+                className="rounded-xl bg-cyan-500 px-5 py-2.5 text-sm font-bold text-slate-950 transition hover:bg-cyan-400"
+              >
+                Get another number
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -687,7 +858,11 @@ function ActivationLoading() {
 
 export default function ActivationPage() {
   return (
-    <Suspense fallback={<ActivationLoading />}>
+    <Suspense
+      fallback={
+        <ActivationLoading />
+      }
+    >
       <ActivationContent />
     </Suspense>
   );
