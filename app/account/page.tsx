@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../../lib/supabase";
@@ -13,35 +13,55 @@ export default function AccountPage() {
   const [createdAt, setCreatedAt] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
   const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState<"success" | "error">(
-    "success"
-  );
+  const [messageType, setMessageType] = useState<
+    "success" | "error"
+  >("success");
+
+  const loadAccount = useCallback(async () => {
+    try {
+      setLoading(true);
+      setMessage("");
+
+      let {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
+
+      if (error || !user) {
+        const { data: refreshed } =
+          await supabase.auth.refreshSession();
+
+        user = refreshed.user ?? null;
+      }
+
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      setEmail(user.email || "");
+      setFullName(user.user_metadata?.full_name || "");
+      setCreatedAt(user.created_at || "");
+    } catch (err) {
+      console.error("ACCOUNT LOAD ERROR:", err);
+
+      setMessageType("error");
+      setMessage("Unable to load your account.");
+    } finally {
+      setLoading(false);
+    }
+  }, [router]);
 
   useEffect(() => {
     loadAccount();
-  }, []);
+  }, [loadAccount]);
 
-  async function loadAccount() {
-    setLoading(true);
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      router.replace("/login");
-      return;
-    }
-
-    setEmail(user.email || "");
-    setFullName(user.user_metadata?.full_name || "");
-    setCreatedAt(user.created_at || "");
-
-    setLoading(false);
-  }
-
-  async function handleSave(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSave(
+    e: React.FormEvent<HTMLFormElement>
+  ) {
     e.preventDefault();
 
     setMessage("");
@@ -52,203 +72,737 @@ export default function AccountPage() {
       return;
     }
 
-    setSaving(true);
+    try {
+      setSaving(true);
 
-    const { error } = await supabase.auth.updateUser({
-      data: {
-        full_name: fullName.trim(),
-      },
-    });
+      const { error } =
+        await supabase.auth.updateUser({
+          data: {
+            full_name: fullName.trim(),
+          },
+        });
 
-    setSaving(false);
+      if (error) {
+        throw error;
+      }
 
-    if (error) {
+      setMessageType("success");
+      setMessage(
+        "Your account details have been updated successfully."
+      );
+    } catch (err) {
+      console.error("ACCOUNT SAVE ERROR:", err);
+
       setMessageType("error");
-      setMessage(error.message);
-      return;
+      setMessage(
+        err instanceof Error
+          ? err.message
+          : "Unable to update your account."
+      );
+    } finally {
+      setSaving(false);
     }
+  }
 
-    setMessageType("success");
-    setMessage("Your account details have been updated successfully.");
+  async function handleLogout() {
+    try {
+      setLoggingOut(true);
+      setMessage("");
+
+      const { error } =
+        await supabase.auth.signOut();
+
+      if (error) {
+        throw error;
+      }
+
+      router.replace("/login");
+      router.refresh();
+    } catch (err) {
+      console.error("LOGOUT ERROR:", err);
+
+      setLoggingOut(false);
+      setMessageType("error");
+      setMessage(
+        err instanceof Error
+          ? err.message
+          : "Unable to log out."
+      );
+    }
   }
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-700 border-t-white" />
-          <p className="text-slate-400">Loading account...</p>
+      <main className="loading-page">
+        <div className="loading-box">
+          <div className="spinner" />
+          <p>Loading account...</p>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-white">
-      {/* Header */}
-      <header className="border-b border-slate-800 bg-slate-950/95">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
-          <Link href="/admin/dashboard" className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white font-black text-slate-950">
-              M
-            </div>
+    <main className="page">
+      <style>{`
+        * {
+          box-sizing: border-box;
+        }
 
-            <div>
-              <div className="font-bold">Moriki SMS</div>
-              <div className="text-xs text-slate-500">
-                Account Management
-              </div>
-            </div>
+        body {
+          margin: 0;
+          background: #020617;
+          font-family: Arial, sans-serif;
+        }
+
+        .page {
+          min-height: 100vh;
+          color: white;
+          background:
+            radial-gradient(
+              circle at top right,
+              rgba(33,150,243,.18),
+              transparent 35%
+            ),
+            linear-gradient(
+              135deg,
+              #020617,
+              #0f172a,
+              #020617
+            );
+        }
+
+        .loading-page {
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #020617;
+          color: white;
+        }
+
+        .loading-box {
+          text-align: center;
+          color: #94a3b8;
+        }
+
+        .spinner {
+          width: 38px;
+          height: 38px;
+          margin: 0 auto 15px;
+          border: 4px solid rgba(255,255,255,.10);
+          border-top-color: #2196f3;
+          border-radius: 50%;
+          animation: spin .8s linear infinite;
+        }
+
+        @keyframes spin {
+          to {
+            transform: rotate(360deg);
+          }
+        }
+
+        .header {
+          border-bottom: 1px solid rgba(255,255,255,.08);
+          background: rgba(2,6,23,.96);
+          position: sticky;
+          top: 0;
+          z-index: 10;
+        }
+
+        .header-inner {
+          max-width: 1100px;
+          margin: auto;
+          padding: 18px 20px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 20px;
+        }
+
+        .logo {
+          color: white;
+          text-decoration: none;
+          font-size: 24px;
+          font-weight: 900;
+        }
+
+        .logo span {
+          color: #2196f3;
+        }
+
+        .nav {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+        }
+
+        .nav a {
+          color: #94a3b8;
+          text-decoration: none;
+          font-size: 13px;
+          font-weight: 700;
+        }
+
+        .nav a:hover {
+          color: white;
+        }
+
+        .dashboard-button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 40px;
+          padding: 0 15px;
+          border-radius: 10px;
+          border: 1px solid rgba(255,255,255,.10);
+          color: #e2e8f0 !important;
+          background: rgba(255,255,255,.04);
+        }
+
+        .dashboard-button:hover {
+          background: rgba(255,255,255,.08);
+        }
+
+        .container {
+          max-width: 950px;
+          margin: auto;
+          padding: 45px 20px 70px;
+        }
+
+        .heading {
+          margin-bottom: 30px;
+        }
+
+        .eyebrow {
+          color: #2196f3;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 1.8px;
+        }
+
+        h1 {
+          margin: 8px 0 0;
+          font-size: 40px;
+          letter-spacing: -1px;
+        }
+
+        .subtitle {
+          margin-top: 10px;
+          color: #94a3b8;
+          font-size: 14px;
+          line-height: 1.6;
+        }
+
+        .card {
+          margin-top: 18px;
+          padding: 25px;
+          border-radius: 18px;
+          border: 1px solid rgba(255,255,255,.08);
+          background: rgba(15,23,42,.96);
+          box-shadow: 0 15px 40px rgba(0,0,0,.18);
+        }
+
+        .card-header {
+          margin-bottom: 22px;
+        }
+
+        .card-title {
+          font-size: 19px;
+          font-weight: 900;
+        }
+
+        .card-description {
+          margin-top: 6px;
+          color: #64748b;
+          font-size: 13px;
+          line-height: 1.5;
+        }
+
+        .message {
+          margin-bottom: 20px;
+          padding: 13px 15px;
+          border-radius: 11px;
+          font-size: 13px;
+          line-height: 1.5;
+        }
+
+        .success {
+          border: 1px solid rgba(74,222,128,.25);
+          background: rgba(34,197,94,.08);
+          color: #86efac;
+        }
+
+        .error {
+          border: 1px solid rgba(248,113,113,.25);
+          background: rgba(127,29,29,.20);
+          color: #fecaca;
+        }
+
+        .form {
+          display: flex;
+          flex-direction: column;
+          gap: 18px;
+        }
+
+        .field label {
+          display: block;
+          margin-bottom: 8px;
+          color: #cbd5e1;
+          font-size: 13px;
+          font-weight: 700;
+        }
+
+        .input {
+          width: 100%;
+          min-height: 48px;
+          padding: 0 14px;
+          border-radius: 11px;
+          border: 1px solid #334155;
+          outline: none;
+          background: #020617;
+          color: white;
+          font-size: 14px;
+        }
+
+        .input::placeholder {
+          color: #475569;
+        }
+
+        .input:focus {
+          border-color: #2196f3;
+          box-shadow: 0 0 0 3px rgba(33,150,243,.10);
+        }
+
+        .input:disabled {
+          color: #64748b;
+          cursor: not-allowed;
+        }
+
+        .hint {
+          margin-top: 7px;
+          color: #64748b;
+          font-size: 11px;
+          line-height: 1.5;
+        }
+
+        .save-button {
+          align-self: flex-start;
+          min-height: 45px;
+          padding: 0 20px;
+          border: none;
+          border-radius: 11px;
+          background: linear-gradient(
+            135deg,
+            #1976d2,
+            #2196f3
+          );
+          color: white;
+          font-size: 14px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .save-button:hover {
+          opacity: .92;
+        }
+
+        .save-button:disabled {
+          opacity: .55;
+          cursor: not-allowed;
+        }
+
+        .info-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 14px;
+        }
+
+        .info-box {
+          padding: 17px;
+          border-radius: 13px;
+          border: 1px solid rgba(255,255,255,.07);
+          background: #020617;
+        }
+
+        .info-label {
+          color: #64748b;
+          font-size: 10px;
+          font-weight: 900;
+          letter-spacing: .8px;
+          text-transform: uppercase;
+        }
+
+        .info-value {
+          margin-top: 8px;
+          color: #f8fafc;
+          font-size: 14px;
+          font-weight: 700;
+          word-break: break-word;
+        }
+
+        .security-row,
+        .support-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 20px;
+        }
+
+        .security-text,
+        .support-text {
+          min-width: 0;
+        }
+
+        .security-title,
+        .support-title {
+          font-size: 16px;
+          font-weight: 800;
+        }
+
+        .security-description,
+        .support-description {
+          margin-top: 6px;
+          color: #64748b;
+          font-size: 13px;
+          line-height: 1.5;
+        }
+
+        .outline-button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 43px;
+          padding: 0 17px;
+          flex-shrink: 0;
+          border-radius: 10px;
+          border: 1px solid #334155;
+          color: white;
+          background: transparent;
+          text-decoration: none;
+          font-size: 13px;
+          font-weight: 800;
+        }
+
+        .outline-button:hover {
+          background: rgba(255,255,255,.05);
+          border-color: #475569;
+        }
+
+        .logout-card {
+          border-color: rgba(248,113,113,.14);
+        }
+
+        .logout-button {
+          min-height: 43px;
+          padding: 0 17px;
+          border: 1px solid rgba(248,113,113,.30);
+          border-radius: 10px;
+          background: rgba(127,29,29,.15);
+          color: #fca5a5;
+          font-size: 13px;
+          font-weight: 900;
+          cursor: pointer;
+        }
+
+        .logout-button:hover {
+          background: rgba(127,29,29,.28);
+        }
+
+        .logout-button:disabled {
+          opacity: .55;
+          cursor: not-allowed;
+        }
+
+        @media (max-width: 700px) {
+          .header-inner {
+            padding: 15px;
+          }
+
+          .nav a:not(.dashboard-button) {
+            display: none;
+          }
+
+          .container {
+            padding: 32px 15px 50px;
+          }
+
+          h1 {
+            font-size: 33px;
+          }
+
+          .card {
+            padding: 20px;
+          }
+
+          .info-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .security-row,
+          .support-row {
+            align-items: stretch;
+            flex-direction: column;
+          }
+
+          .outline-button,
+          .logout-button {
+            width: 100%;
+          }
+        }
+      `}</style>
+
+      <header className="header">
+        <div className="header-inner">
+          <Link href="/dashboard" className="logo">
+            Moriki <span>SMS</span>
           </Link>
 
-          <Link
-            href="/admin/dashboard"
-            className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
-          >
-            ← Dashboard
-          </Link>
+          <nav className="nav">
+            <Link href="/wallet">
+              Wallet
+            </Link>
+
+            <Link href="/orders">
+              Orders
+            </Link>
+
+            <Link
+              href="/dashboard"
+              className="dashboard-button"
+            >
+              ← Dashboard
+            </Link>
+          </nav>
         </div>
       </header>
 
-      <div className="mx-auto max-w-4xl px-6 py-10">
-        {/* Page heading */}
-        <div className="mb-8">
-          <p className="mb-2 text-sm font-medium text-slate-500">
+      <div className="container">
+        <div className="heading">
+          <div className="eyebrow">
             MY ACCOUNT
-          </p>
+          </div>
 
-          <h1 className="text-3xl font-bold tracking-tight">
-            Account Management
-          </h1>
+          <h1>Account Management</h1>
 
-          <p className="mt-2 text-slate-400">
-            Manage your Moriki SMS account information and security.
+          <p className="subtitle">
+            Manage your profile, account information,
+            security, and customer support.
           </p>
         </div>
 
-        {/* Profile card */}
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-xl">
-          <div className="mb-6">
-            <h2 className="text-xl font-semibold">Profile information</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Update the name associated with your account.
-            </p>
+        {message && (
+          <div
+            className={`message ${
+              messageType === "success"
+                ? "success"
+                : "error"
+            }`}
+          >
+            {message}
+          </div>
+        )}
+
+        <section className="card">
+          <div className="card-header">
+            <div className="card-title">
+              Profile information
+            </div>
+
+            <div className="card-description">
+              Update the name associated with your
+              Moriki SMS account.
+            </div>
           </div>
 
-          {message && (
-            <div
-              className={`mb-6 rounded-xl border px-4 py-3 text-sm ${
-                messageType === "success"
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                  : "border-red-500/30 bg-red-500/10 text-red-300"
-              }`}
-            >
-              {message}
-            </div>
-          )}
-
-          <form onSubmit={handleSave} className="space-y-5">
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-300">
+          <form
+            onSubmit={handleSave}
+            className="form"
+          >
+            <div className="field">
+              <label htmlFor="fullName">
                 Full name
               </label>
 
               <input
+                id="fullName"
                 type="text"
                 value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
+                onChange={(e) =>
+                  setFullName(e.target.value)
+                }
                 placeholder="Enter your full name"
                 disabled={saving}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none placeholder:text-slate-600 focus:border-white disabled:opacity-60"
+                className="input"
               />
             </div>
 
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-300">
+            <div className="field">
+              <label htmlFor="email">
                 Email address
               </label>
 
               <input
+                id="email"
                 type="email"
                 value={email}
                 disabled
-                className="w-full rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-slate-500 outline-none"
+                className="input"
               />
 
-              <p className="mt-2 text-xs text-slate-600">
-                Your login email cannot be changed from this page.
-              </p>
+              <div className="hint">
+                Your login email cannot be changed
+                from this page.
+              </div>
             </div>
 
             <button
               type="submit"
               disabled={saving}
-              className="rounded-xl bg-white px-5 py-3 font-semibold text-slate-950 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+              className="save-button"
             >
-              {saving ? "Saving..." : "Save changes"}
+              {saving
+                ? "Saving..."
+                : "Save changes"}
             </button>
           </form>
         </section>
 
-        {/* Account information */}
-        <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-6">
-          <h2 className="text-xl font-semibold">Account information</h2>
-
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-500">
-                Email
-              </p>
-              <p className="mt-2 break-all font-medium text-white">
-                {email}
-              </p>
+        <section className="card">
+          <div className="card-header">
+            <div className="card-title">
+              Account information
             </div>
 
-            <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-500">
+            <div className="card-description">
+              Basic information about your Moriki
+              SMS account.
+            </div>
+          </div>
+
+          <div className="info-grid">
+            <div className="info-box">
+              <div className="info-label">
+                Email
+              </div>
+
+              <div className="info-value">
+                {email || "Unavailable"}
+              </div>
+            </div>
+
+            <div className="info-box">
+              <div className="info-label">
                 Account created
-              </p>
-              <p className="mt-2 font-medium text-white">
+              </div>
+
+              <div className="info-value">
                 {createdAt
-                  ? new Date(createdAt).toLocaleDateString()
+                  ? new Date(
+                      createdAt
+                    ).toLocaleDateString(
+                      "en-NG",
+                      {
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric",
+                      }
+                    )
                   : "Unavailable"}
-              </p>
+              </div>
             </div>
           </div>
         </section>
 
-        {/* Security */}
-        <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-6">
-          <h2 className="text-xl font-semibold">Security</h2>
+        <section className="card">
+          <div className="card-header">
+            <div className="card-title">
+              Security
+            </div>
 
-          <p className="mt-2 text-sm text-slate-400">
-            Keep your account secure by using a strong password.
-          </p>
+            <div className="card-description">
+              Keep your account protected with a
+              strong password.
+            </div>
+          </div>
 
-          <Link
-            href="/reset-password"
-            className="mt-5 inline-flex rounded-xl border border-slate-700 px-5 py-3 text-sm font-semibold text-white transition hover:border-slate-500 hover:bg-slate-800"
-          >
-            Change password
-          </Link>
+          <div className="security-row">
+            <div className="security-text">
+              <div className="security-title">
+                Password
+              </div>
+
+              <div className="security-description">
+                Change your account password whenever
+                you need to.
+              </div>
+            </div>
+
+            <Link
+              href="/reset-password"
+              className="outline-button"
+            >
+              Change password
+            </Link>
+          </div>
         </section>
 
-        {/* Customer care */}
-        <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-6">
-          <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
-            <div>
-              <h2 className="text-xl font-semibold">Customer Care</h2>
-              <p className="mt-2 text-sm text-slate-400">
-                Need help with your account, numbers, wallet, or an order?
-              </p>
+        <section className="card">
+          <div className="card-header">
+            <div className="card-title">
+              Customer Care
+            </div>
+
+            <div className="card-description">
+              We're here to help with your account,
+              wallet, numbers, or orders.
+            </div>
+          </div>
+
+          <div className="support-row">
+            <div className="support-text">
+              <div className="support-title">
+                Need help?
+              </div>
+
+              <div className="support-description">
+                Contact support and send us the
+                details of your issue.
+              </div>
             </div>
 
             <Link
               href="/support"
-              className="inline-flex shrink-0 items-center justify-center rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-200"
+              className="outline-button"
             >
               Contact Support
             </Link>
+          </div>
+        </section>
+
+        <section className="card logout-card">
+          <div className="security-row">
+            <div className="security-text">
+              <div className="security-title">
+                Sign out
+              </div>
+
+              <div className="security-description">
+                Sign out of your Moriki SMS account
+                on this device.
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="logout-button"
+            >
+              {loggingOut
+                ? "Signing out..."
+                : "Sign out"}
+            </button>
           </div>
         </section>
       </div>
