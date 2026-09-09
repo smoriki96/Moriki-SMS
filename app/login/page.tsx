@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "../../lib/supabase";
 
 export default function LoginPage() {
@@ -10,7 +11,9 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState<"error" | "success">("error");
+  const [messageType, setMessageType] = useState<
+    "error" | "success"
+  >("error");
   const [loading, setLoading] = useState(false);
 
   async function handleLogin(
@@ -57,13 +60,6 @@ export default function LoginPage() {
       setMessageType("success");
       setMessage("Login successful. Redirecting...");
 
-      /*
-       * All normal login accounts go to the
-       * customer dashboard.
-       *
-       * Admin access is protected separately
-       * by the server-side proxy.
-       */
       router.replace("/dashboard");
     } catch (error) {
       console.error("LOGIN ERROR:", error);
@@ -149,7 +145,9 @@ export default function LoginPage() {
             autoComplete="email"
             placeholder="Enter your email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) =>
+              setEmail(e.target.value)
+            }
             disabled={loading}
             style={{
               width: "100%",
@@ -164,17 +162,36 @@ export default function LoginPage() {
             }}
           />
 
-          <label
-            htmlFor="password"
+          <div
             style={{
-              display: "block",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
               marginTop: "20px",
               marginBottom: "8px",
-              fontWeight: "600",
             }}
           >
-            Password
-          </label>
+            <label
+              htmlFor="password"
+              style={{
+                fontWeight: "600",
+              }}
+            >
+              Password
+            </label>
+
+            <Link
+              href="/reset-password"
+              style={{
+                color: "#60a5fa",
+                textDecoration: "none",
+                fontSize: "12px",
+                fontWeight: "600",
+              }}
+            >
+              Forgot password?
+            </Link>
+          </div>
 
           <input
             id="password"
@@ -182,7 +199,9 @@ export default function LoginPage() {
             autoComplete="current-password"
             placeholder="Enter your password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) =>
+              setPassword(e.target.value)
+            }
             disabled={loading}
             style={{
               width: "100%",
@@ -206,14 +225,20 @@ export default function LoginPage() {
               padding: "15px",
               border: "none",
               borderRadius: "10px",
-              background: loading ? "#475569" : "#2563eb",
+              background: loading
+                ? "#475569"
+                : "#2563eb",
               color: "#ffffff",
               fontSize: "16px",
               fontWeight: "700",
-              cursor: loading ? "not-allowed" : "pointer",
+              cursor: loading
+                ? "not-allowed"
+                : "pointer",
             }}
           >
-            {loading ? "Checking..." : "Login"}
+            {loading
+              ? "Checking..."
+              : "Login"}
           </button>
         </form>
 
@@ -246,7 +271,7 @@ export default function LoginPage() {
           }}
         >
           Don't have an account?{" "}
-          <a
+          <Link
             href="/register"
             style={{
               color: "#60a5fa",
@@ -255,7 +280,7 @@ export default function LoginPage() {
             }}
           >
             Create Account
-          </a>
+          </Link>
         </p>
       </div>
     </main>
