@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 
@@ -9,74 +9,109 @@ const ADMIN_EMAIL = "namoriki30@gmail.com";
 type Order = {
   id: string;
   user_id: string;
-  phone_number: string | null;
-  country: string | null;
-  service: string | null;
+  country: string;
+  service: string;
+  amount: number;
+  payment_reference: string | null;
+  payment_status: string | null;
+  order_status: string | null;
   status: string | null;
-  amount: number | null;
-  provider_cost: number | null;
   created_at: string;
+  payment: string | null;
+  phone_id: string | null;
+  phone_number: string | null;
+  verification_code: string | null;
+  fivesim_order_id: number | null;
+  provider_cost: number | null;
 };
 
 type Wallet = {
   user_id: string;
-  balance: number | null;
+  balance: number;
 };
 
 type Transaction = {
   id: string;
   user_id: string;
-  amount: number | null;
-  type: string | null;
+  type: string;
+  amount: number;
   status: string | null;
   reference: string | null;
   description: string | null;
   created_at: string;
 };
 
-type ProfitData = {
-  totalRevenue: number;
-  totalProviderCost: number;
-  totalProfit: number;
-  availableProfit: number;
-  ordersAnalyzed: number;
-  validOrders: number;
-  refundedOrders: number;
+type Customer = {
+  id: string;
+  email: string;
+  name: string;
 };
 
-export default function AdminPage() {
+function formatNGN(value: number) {
+  return `NGN ${Number(value || 0).toLocaleString("en-NG", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatDate(value: string) {
+  return new Date(value).toLocaleString("en-NG", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+export default function AdminDashboard() {
   const router = useRouter();
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
 
-  const [profitData, setProfitData] = useState<ProfitData>({
-    totalRevenue: 0,
-    totalProviderCost: 0,
-    totalProfit: 0,
-    availableProfit: 0,
-    ordersAnalyzed: 0,
-    validOrders: 0,
-    refundedOrders: 0,
-  });
+  const [totalRevenue, setTotalRevenue] = useState(0);
+  const [totalProviderCost, setTotalProviderCost] = useState(0);
+  const [totalProfit, setTotalProfit] = useState(0);
+  const [totalWalletFunds, setTotalWalletFunds] = useState(0);
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [activeOrders, setActiveOrders] = useState(0);
+  const [refundedOrders, setRefundedOrders] = useState(0);
 
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("");
-  const [activeSection, setActiveSection] = useState("overview");
+  const [errorMessage, setErrorMessage] = useState("");
 
-  useEffect(() => {
-    checkAdmin();
-  }, []);
+  // Notification form
+  const [notificationTitle, setNotificationTitle] = useState("");
+  const [notificationMessage, setNotificationMessage] = useState("");
+  const [notificationType, setNotificationType] = useState<
+    "info" | "warning" | "success" | "security"
+  >("warning");
 
-  async function checkAdmin() {
+  const [notificationRecipient, setNotificationRecipient] =
+    useState("all");
+
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState("");
+  const [sendingNotification, setSendingNotification] = useState(false);
+  const [notificationResult, setNotificationResult] = useState("");
+
+  async function loadDashboard(showRefresh = false) {
     try {
+      if (showRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+
+      setErrorMessage("");
+
       const {
         data: { user },
-        error,
+        error: userError,
       } = await supabase.auth.getUser();
 
-      if (error || !user) {
+      if (userError || !user) {
         router.replace("/login");
         return;
       }
@@ -89,18 +124,6 @@ export default function AdminPage() {
         return;
       }
 
-      await loadDashboard();
-    } catch (error) {
-      console.error("ADMIN CHECK ERROR:", error);
-      router.replace("/login");
-    }
-  }
-
-  async function loadDashboard() {
-    setLoading(true);
-    setMessage("");
-
-    try {
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -110,205 +133,194 @@ export default function AdminPage() {
         return;
       }
 
-      const [ordersResponse, walletsResponse, profitResponse] =
-        await Promise.all([
-          supabase
-            .from("orders")
-            .select(
-              "id,user_id,phone_number,country,service,status,amount,provider_cost,created_at"
-            )
-            .order("created_at", {
-              ascending: false,
-            })
-            .limit(100),
+      const response = await fetch("/api/admin/dashboard", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        cache: "no-store",
+      });
 
-          supabase
-            .from("wallets")
-            .select("user_id,balance"),
+      const data = await response.json();
 
-          fetch("/api/admin/profit", {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-            },
-            cache: "no-store",
-          }),
-        ]);
-
-      const transactionsResponse = await fetch(
-        "/api/admin/transactions",
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          cache: "no-store",
-        }
-      );
-
-      if (ordersResponse.error) {
-        console.error("ORDERS ERROR:", ordersResponse.error);
-        setMessage(
-          `Orders error: ${ordersResponse.error.message}`
+      if (!response.ok) {
+        throw new Error(
+          data?.error || "Could not load admin dashboard."
         );
       }
 
-      if (walletsResponse.error) {
-        console.error("WALLETS ERROR:", walletsResponse.error);
-      }
+      setOrders(data.orders || []);
+      setWallets(data.wallets || []);
+      setTransactions(data.transactions || []);
 
-      if (!transactionsResponse.ok) {
-        const transactionError =
-          await transactionsResponse.json().catch(() => null);
+      const stats = data.stats || {};
 
-        console.error(
-          "ADMIN TRANSACTIONS API ERROR:",
-          transactionError
-        );
-
-        setMessage(
-          transactionError?.error ||
-            "Unable to load transaction history."
-        );
-      }
-
-      if (!profitResponse.ok) {
-        const profitError =
-          await profitResponse.json().catch(() => null);
-
-        console.error("PROFIT API ERROR:", profitError);
-
-        setMessage(
-          profitError?.error ||
-            "Unable to load profit balance."
-        );
-      } else {
-        const profit = await profitResponse.json();
-
-        setProfitData({
-          totalRevenue: Number(profit.totalRevenue || 0),
-          totalProviderCost: Number(
-            profit.totalProviderCost || 0
-          ),
-          totalProfit: Number(profit.totalProfit || 0),
-          availableProfit: Number(
-            profit.availableProfit || 0
-          ),
-          ordersAnalyzed: Number(
-            profit.ordersAnalyzed || 0
-          ),
-          validOrders: Number(profit.validOrders || 0),
-          refundedOrders: Number(
-            profit.refundedOrders || 0
-          ),
-        });
-      }
-
-      let loadedTransactions: Transaction[] = [];
-
-      if (transactionsResponse.ok) {
-        const transactionResult =
-          await transactionsResponse.json();
-
-        loadedTransactions = Array.isArray(
-          transactionResult?.transactions
-        )
-          ? transactionResult.transactions
-          : [];
-      }
-
-      setOrders(
-        (ordersResponse.data || []) as Order[]
-      );
-
-      setWallets(
-        (walletsResponse.data || []) as Wallet[]
-      );
-
-      setTransactions(loadedTransactions);
+      setTotalRevenue(Number(stats.totalRevenue || 0));
+      setTotalProviderCost(Number(stats.totalProviderCost || 0));
+      setTotalProfit(Number(stats.totalProfit || 0));
+      setTotalWalletFunds(Number(stats.totalWalletFunds || 0));
+      setTotalOrders(Number(stats.totalOrders || 0));
+      setActiveOrders(Number(stats.activeOrders || 0));
+      setRefundedOrders(Number(stats.refundedOrders || 0));
     } catch (error) {
-      console.error("DASHBOARD LOAD ERROR:", error);
+      console.error("ADMIN DASHBOARD ERROR:", error);
 
-      setMessage(
+      setErrorMessage(
         error instanceof Error
           ? error.message
-          : "Unable to load admin dashboard."
+          : "Something went wrong."
       );
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
-  async function handleLogout() {
+  async function loadCustomers() {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) return;
+
+      const response = await fetch("/api/admin/customers", {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        cache: "no-store",
+      });
+
+      if (!response.ok) return;
+
+      const data = await response.json();
+
+      const list = Array.isArray(data.customers)
+        ? data.customers
+        : [];
+
+      setCustomers(
+        list.map((customer: any) => ({
+          id: customer.id,
+          email: customer.email || "",
+          name:
+            customer.name ||
+            customer.user_metadata?.full_name ||
+            customer.user_metadata?.name ||
+            customer.email ||
+            "Customer",
+        }))
+      );
+    } catch (error) {
+      console.error("CUSTOMERS LOAD ERROR:", error);
+    }
+  }
+
+  async function sendNotification() {
+    setNotificationResult("");
+
+    if (!notificationTitle.trim()) {
+      setNotificationResult("Please enter a notification title.");
+      return;
+    }
+
+    if (!notificationMessage.trim()) {
+      setNotificationResult("Please enter a notification message.");
+      return;
+    }
+
+    if (
+      notificationRecipient === "customer" &&
+      !selectedCustomer
+    ) {
+      setNotificationResult("Please select a customer.");
+      return;
+    }
+
+    try {
+      setSendingNotification(true);
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        setNotificationResult("Your admin session has expired.");
+        return;
+      }
+
+      const response = await fetch("/api/admin/notifications", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: notificationTitle.trim(),
+          message: notificationMessage.trim(),
+          type: notificationType,
+          user_id:
+            notificationRecipient === "all"
+              ? null
+              : selectedCustomer,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.error || "Could not send notification."
+        );
+      }
+
+      setNotificationResult(
+        notificationRecipient === "all"
+          ? "Notification sent to all customers."
+          : "Notification sent successfully."
+      );
+
+      setNotificationTitle("");
+      setNotificationMessage("");
+      setSelectedCustomer("");
+    } catch (error) {
+      console.error("SEND NOTIFICATION ERROR:", error);
+
+      setNotificationResult(
+        error instanceof Error
+          ? error.message
+          : "Could not send notification."
+      );
+    } finally {
+      setSendingNotification(false);
+    }
+  }
+
+  async function logout() {
     await supabase.auth.signOut();
     router.replace("/login");
   }
 
-  const totalRevenue = profitData.totalRevenue;
-  const totalProviderCost = profitData.totalProviderCost;
-  const totalProfit = profitData.totalProfit;
-  const availableProfit = profitData.availableProfit;
+  useEffect(() => {
+    loadDashboard();
+    loadCustomers();
+  }, []);
 
-  const totalWalletBalance = useMemo(() => {
-    return wallets.reduce(
-      (total, wallet) =>
-        total + Number(wallet.balance || 0),
-      0
-    );
-  }, [wallets]);
-
-  const activeOrders = useMemo(() => {
-    return orders.filter((order) => {
-      const status = String(
-        order.status || ""
-      ).toLowerCase();
-
-      return (
-        status === "pending" ||
-        status === "active" ||
-        status === "received"
-      );
-    });
-  }, [orders]);
-
-  function formatNGN(value: number) {
-    const numericValue = Number(value);
-
-    if (!Number.isFinite(numericValue)) {
-      return "NGN 0";
-    }
-
-    return `NGN ${numericValue.toLocaleString("en-NG")}`;
-  }
-
-  function formatDate(value: string) {
-    try {
-      return new Date(value).toLocaleString("en-NG", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      });
-    } catch {
-      return value;
-    }
-  }
-
-  function getOrderPhone(order: Order) {
-    return order.phone_number || "N/A";
-  }
-
-  function getOrderProfit(order: Order) {
+  if (loading) {
     return (
-      Number(order.amount || 0) -
-      Number(order.provider_cost || 0)
+      <main
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#f5f7fb",
+          fontFamily: "Arial, sans-serif",
+        }}
+      >
+        <div style={{ fontSize: 18 }}>Loading admin dashboard...</div>
+      </main>
     );
-  }
-
-  function goToCustomers() {
-    router.push("/admin/customers");
-  }
-
-  function goToSupport() {
-    router.push("/admin/support");
   }
 
   return (
@@ -316,735 +328,499 @@ export default function AdminPage() {
       style={{
         minHeight: "100vh",
         background: "#f5f7fb",
+        fontFamily: "Arial, sans-serif",
         color: "#111827",
-        fontFamily: "Arial, Helvetica, sans-serif",
       }}
     >
       <header
         style={{
           background: "#111827",
-          color: "#ffffff",
+          color: "white",
           padding: "18px 24px",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          gap: "20px",
+          gap: 15,
           flexWrap: "wrap",
         }}
       >
         <div>
-          <h1
-            style={{
-              margin: 0,
-              fontSize: "24px",
-              fontWeight: 800,
-            }}
-          >
-            Moriki SMS
+          <h1 style={{ margin: 0, fontSize: 25 }}>
+            Moriki SMS Admin
           </h1>
 
           <p
             style={{
               margin: "5px 0 0",
-              color: "#cbd5e1",
-              fontSize: "13px",
+              opacity: 0.75,
+              fontSize: 13,
             }}
           >
-            Administrator Dashboard
+            Administration Dashboard
           </p>
         </div>
 
-        <button
-          onClick={handleLogout}
-          style={{
-            border: "1px solid #475569",
-            background: "#1e293b",
-            color: "#ffffff",
-            padding: "10px 16px",
-            borderRadius: "8px",
-            cursor: "pointer",
-            fontWeight: 700,
-          }}
-        >
-          Logout
-        </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            onClick={() => loadDashboard(true)}
+            disabled={refreshing}
+            style={{
+              padding: "10px 15px",
+              borderRadius: 8,
+              border: "1px solid #4b5563",
+              background: "#1f2937",
+              color: "white",
+              cursor: refreshing ? "not-allowed" : "pointer",
+            }}
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
+          </button>
+
+          <button
+            onClick={logout}
+            style={{
+              padding: "10px 15px",
+              borderRadius: 8,
+              border: "none",
+              background: "#dc2626",
+              color: "white",
+              cursor: "pointer",
+            }}
+          >
+            Logout
+          </button>
+        </div>
       </header>
 
       <div
         style={{
-          display: "flex",
-          minHeight: "calc(100vh - 82px)",
-          flexWrap: "wrap",
+          maxWidth: 1400,
+          margin: "0 auto",
+          padding: 24,
         }}
       >
-        <aside
+        {errorMessage && (
+          <div
+            style={{
+              background: "#fee2e2",
+              color: "#991b1b",
+              padding: 14,
+              borderRadius: 10,
+              marginBottom: 20,
+            }}
+          >
+            {errorMessage}
+          </div>
+        )}
+
+        {/* STATS */}
+        <section
           style={{
-            width: "250px",
-            background: "#ffffff",
-            borderRight: "1px solid #e5e7eb",
-            padding: "20px",
-            boxSizing: "border-box",
+            display: "grid",
+            gridTemplateColumns:
+              "repeat(auto-fit,minmax(190px,1fr))",
+            gap: 15,
+            marginBottom: 25,
           }}
         >
+          <StatCard
+            title="Total Revenue"
+            value={formatNGN(totalRevenue)}
+          />
+
+          <StatCard
+            title="5SIM Cost"
+            value={formatNGN(totalProviderCost)}
+          />
+
+          <StatCard
+            title="Total Profit"
+            value={formatNGN(totalProfit)}
+          />
+
+          <StatCard
+            title="Wallet Funds"
+            value={formatNGN(totalWalletFunds)}
+          />
+
+          <StatCard
+            title="Total Orders"
+            value={String(totalOrders)}
+          />
+
+          <StatCard
+            title="Active Orders"
+            value={String(activeOrders)}
+          />
+
+          <StatCard
+            title="Refunded / Cancelled"
+            value={String(refundedOrders)}
+          />
+        </section>
+
+        {/* NAVIGATION */}
+        <section
+          style={{
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            marginBottom: 25,
+          }}
+        >
+          <button
+            onClick={() => router.push("/admin/customers")}
+            style={navButton}
+          >
+            Customers
+          </button>
+
+          <button
+            onClick={() => router.push("/admin/support")}
+            style={navButton}
+          >
+            Support
+          </button>
+        </section>
+
+        {/* CREATE NOTIFICATION */}
+        <section style={cardStyle}>
+          <h2 style={sectionTitle}>
+            ?? Create Customer Notification
+          </h2>
+
+          <p
+            style={{
+              color: "#6b7280",
+              fontSize: 14,
+              marginTop: 0,
+            }}
+          >
+            Send a one-time notification directly to customers.
+          </p>
+
           <div
             style={{
               display: "grid",
-              gap: "8px",
-            }}
-          >
-            <button
-              onClick={() => setActiveSection("overview")}
-              style={navButtonStyle(
-                activeSection === "overview"
-              )}
-            >
-              Overview
-            </button>
-
-            <button
-              onClick={() => setActiveSection("orders")}
-              style={navButtonStyle(
-                activeSection === "orders"
-              )}
-            >
-              Orders
-            </button>
-
-            <button
-              onClick={() =>
-                setActiveSection("transactions")
-              }
-              style={navButtonStyle(
-                activeSection === "transactions"
-              )}
-            >
-              Transactions
-            </button>
-
-            <div
-              style={{
-                height: "1px",
-                background: "#e5e7eb",
-                margin: "10px 0",
-              }}
-            />
-
-            <button
-              onClick={goToCustomers}
-              style={navButtonStyle(false)}
-            >
-              Customers
-            </button>
-
-            <button
-              onClick={goToSupport}
-              style={navButtonStyle(false)}
-            >
-              Customer Support
-            </button>
-          </div>
-
-          <div
-            style={{
-              marginTop: "30px",
-              padding: "14px",
-              background: "#f8fafc",
-              border: "1px solid #e5e7eb",
-              borderRadius: "10px",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "12px",
-                color: "#64748b",
-                marginBottom: "6px",
-              }}
-            >
-              Customer Wallet Funds
-            </div>
-
-            <div
-              style={{
-                fontSize: "18px",
-                fontWeight: 800,
-              }}
-            >
-              {formatNGN(totalWalletBalance)}
-            </div>
-          </div>
-        </aside>
-
-        <section
-          style={{
-            flex: 1,
-            padding: "24px",
-            minWidth: 0,
-            boxSizing: "border-box",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: "15px",
-              marginBottom: "24px",
-              flexWrap: "wrap",
+              gridTemplateColumns:
+                "repeat(auto-fit,minmax(220px,1fr))",
+              gap: 15,
             }}
           >
             <div>
-              <h2
-                style={{
-                  margin: 0,
-                  fontSize: "25px",
-                }}
-              >
-                {activeSection === "overview"
-                  ? "Overview"
-                  : activeSection === "orders"
-                  ? "Orders"
-                  : "Transactions"}
-              </h2>
+              <label style={labelStyle}>Title</label>
 
-              <p
-                style={{
-                  margin: "6px 0 0",
-                  color: "#64748b",
-                  fontSize: "14px",
-                }}
-              >
-                Monitor your Moriki SMS business.
-              </p>
+              <input
+                value={notificationTitle}
+                onChange={(e) =>
+                  setNotificationTitle(e.target.value)
+                }
+                placeholder="Important security warning"
+                style={inputStyle}
+              />
             </div>
 
-            <button
-              onClick={loadDashboard}
-              disabled={loading}
-              style={{
-                border: "1px solid #d1d5db",
-                background: "#ffffff",
-                padding: "10px 15px",
-                borderRadius: "8px",
-                cursor: loading
-                  ? "not-allowed"
-                  : "pointer",
-                fontWeight: 700,
-              }}
-            >
-              {loading ? "Refreshing..." : "Refresh"}
-            </button>
+            <div>
+              <label style={labelStyle}>Type</label>
+
+              <select
+                value={notificationType}
+                onChange={(e) =>
+                  setNotificationType(
+                    e.target.value as
+                      | "info"
+                      | "warning"
+                      | "success"
+                      | "security"
+                  )
+                }
+                style={inputStyle}
+              >
+                <option value="info">Information</option>
+                <option value="warning">Warning</option>
+                <option value="success">Success</option>
+                <option value="security">Security</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Send To</label>
+
+              <select
+                value={notificationRecipient}
+                onChange={(e) =>
+                  setNotificationRecipient(e.target.value)
+                }
+                style={inputStyle}
+              >
+                <option value="all">All Customers</option>
+                <option value="customer">
+                  Specific Customer
+                </option>
+              </select>
+            </div>
+
+            {notificationRecipient === "customer" && (
+              <div>
+                <label style={labelStyle}>Customer</label>
+
+                <select
+                  value={selectedCustomer}
+                  onChange={(e) =>
+                    setSelectedCustomer(e.target.value)
+                  }
+                  style={inputStyle}
+                >
+                  <option value="">
+                    Select customer
+                  </option>
+
+                  {customers.map((customer) => (
+                    <option
+                      key={customer.id}
+                      value={customer.id}
+                    >
+                      {customer.name} � {customer.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
-          {message && (
+          <div style={{ marginTop: 15 }}>
+            <label style={labelStyle}>Message</label>
+
+            <textarea
+              value={notificationMessage}
+              onChange={(e) =>
+                setNotificationMessage(e.target.value)
+              }
+              placeholder="Your message to the customer..."
+              rows={4}
+              style={{
+                ...inputStyle,
+                resize: "vertical",
+              }}
+            />
+          </div>
+
+          <button
+            onClick={sendNotification}
+            disabled={sendingNotification}
+            style={{
+              marginTop: 15,
+              padding: "12px 18px",
+              border: "none",
+              borderRadius: 8,
+              background: "#2563eb",
+              color: "white",
+              fontWeight: 600,
+              cursor: sendingNotification
+                ? "not-allowed"
+                : "pointer",
+            }}
+          >
+            {sendingNotification
+              ? "Sending..."
+              : "Send Notification"}
+          </button>
+
+          {notificationResult && (
             <div
               style={{
-                background: "#fef2f2",
-                border: "1px solid #fecaca",
-                color: "#991b1b",
-                padding: "13px",
-                borderRadius: "9px",
-                marginBottom: "20px",
+                marginTop: 12,
+                padding: 12,
+                borderRadius: 8,
+                background: notificationResult
+                  .toLowerCase()
+                  .includes("successfully") ||
+                notificationResult
+                  .toLowerCase()
+                  .includes("sent")
+                  ? "#dcfce7"
+                  : "#fee2e2",
+                color: notificationResult
+                  .toLowerCase()
+                  .includes("successfully") ||
+                notificationResult
+                  .toLowerCase()
+                  .includes("sent")
+                  ? "#166534"
+                  : "#991b1b",
               }}
             >
-              {message}
+              {notificationResult}
             </div>
           )}
+        </section>
 
-          {loading ? (
-            <div
-              style={{
-                background: "#ffffff",
-                border: "1px solid #e5e7eb",
-                borderRadius: "12px",
-                padding: "30px",
-                textAlign: "center",
-              }}
-            >
-              Loading dashboard...
-            </div>
+        {/* LATEST ORDERS */}
+        <section style={cardStyle}>
+          <div style={sectionHeaderStyle}>
+            <h2 style={sectionTitle}>
+              Latest Orders
+            </h2>
+
+            <span style={countBadge}>
+              {orders.length}
+            </span>
+          </div>
+
+          {orders.length === 0 ? (
+            <p style={emptyStyle}>No orders found.</p>
           ) : (
-            <>
-              {activeSection === "overview" && (
-                <>
-                  <div
-                    style={{
-                      background: "#111827",
-                      color: "#ffffff",
-                      borderRadius: "16px",
-                      padding: "22px",
-                      marginBottom: "20px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: "13px",
-                        color: "#cbd5e1",
-                        marginBottom: "6px",
-                      }}
-                    >
-                      Admin Profit Balance
-                    </div>
+            <div style={tableWrapper}>
+              <table style={tableStyle}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Date</th>
+                    <th style={thStyle}>Country</th>
+                    <th style={thStyle}>Service</th>
+                    <th style={thStyle}>Number</th>
+                    <th style={thStyle}>Status</th>
+                    <th style={thStyle}>Customer Price</th>
+                    <th style={thStyle}>5SIM Cost</th>
+                    <th style={thStyle}>Profit</th>
+                  </tr>
+                </thead>
 
-                    <div
-                      style={{
-                        fontSize: "34px",
-                        fontWeight: 900,
-                        marginBottom: "5px",
-                      }}
-                    >
-                      {formatNGN(availableProfit)}
-                    </div>
+                <tbody>
+                  {orders.slice(0, 20).map((order) => {
+                    const providerCost = Number(
+                      order.provider_cost || 0
+                    );
 
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        color: "#94a3b8",
-                      }}
-                    >
-                      Available profit from valid number sales
-                    </div>
-                  </div>
+                    const amount = Number(order.amount || 0);
 
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fit, minmax(210px, 1fr))",
-                      gap: "16px",
-                      marginBottom: "24px",
-                    }}
-                  >
-                    <ProfitCard
-                      title="Total Revenue"
-                      value={formatNGN(totalRevenue)}
-                      description="All valid customer sales"
-                    />
+                    const profit =
+                      amount - providerCost;
 
-                    <ProfitCard
-                      title="Total 5SIM Cost"
-                      value={formatNGN(
-                        totalProviderCost
-                      )}
-                      description="All recorded 5SIM costs"
-                    />
+                    return (
+                      <tr key={order.id}>
+                        <td style={tdStyle}>
+                          {formatDate(order.created_at)}
+                        </td>
 
-                    <ProfitCard
-                      title="Your Profit"
-                      value={formatNGN(totalProfit)}
-                      description="Revenue minus 5SIM cost"
-                    />
+                        <td style={tdStyle}>
+                          {order.country}
+                        </td>
 
-                    <ProfitCard
-                      title="Available Profit"
-                      value={formatNGN(
-                        availableProfit
-                      )}
-                      description="After refunds and cancellations"
-                    />
-                  </div>
+                        <td style={tdStyle}>
+                          {order.service}
+                        </td>
 
-                  <div
-                    style={{
-                      background: "#ffffff",
-                      border: "1px solid #e5e7eb",
-                      borderRadius: "12px",
-                      padding: "15px 18px",
-                      marginBottom: "24px",
-                      display: "flex",
-                      gap: "25px",
-                      flexWrap: "wrap",
-                      color: "#64748b",
-                      fontSize: "13px",
-                    }}
-                  >
-                    <span>
-                      Orders analyzed:{" "}
-                      <strong style={{ color: "#111827" }}>
-                        {profitData.ordersAnalyzed.toLocaleString()}
-                      </strong>
-                    </span>
+                        <td style={tdStyle}>
+                          {order.phone_number || "�"}
+                        </td>
 
-                    <span>
-                      Valid orders:{" "}
-                      <strong style={{ color: "#111827" }}>
-                        {profitData.validOrders.toLocaleString()}
-                      </strong>
-                    </span>
+                        <td style={tdStyle}>
+                          <StatusBadge
+                            status={
+                              order.status ||
+                              order.order_status ||
+                              "unknown"
+                            }
+                          />
+                        </td>
 
-                    <span>
-                      Refunded/cancelled:{" "}
-                      <strong style={{ color: "#111827" }}>
-                        {profitData.refundedOrders.toLocaleString()}
-                      </strong>
-                    </span>
-                  </div>
+                        <td style={tdStyle}>
+                          {formatNGN(amount)}
+                        </td>
 
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fit, minmax(190px, 1fr))",
-                      gap: "16px",
-                      marginBottom: "24px",
-                    }}
-                  >
-                    <StatCard
-                      title="Total Orders"
-                      value={String(orders.length)}
-                      description="Recent orders shown"
-                    />
+                        <td style={tdStyle}>
+                          {formatNGN(providerCost)}
+                        </td>
 
-                    <StatCard
-                      title="Active Orders"
-                      value={String(
-                        activeOrders.length
-                      )}
-                      description="Pending or active"
-                    />
+                        <td style={tdStyle}>
+                          {formatNGN(profit)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
 
-                    <StatCard
-                      title="Wallet Funds"
-                      value={formatNGN(
-                        totalWalletBalance
-                      )}
-                      description="Customer balances"
-                    />
-                  </div>
+        {/* LATEST TRANSACTIONS */}
+        <section style={cardStyle}>
+          <div style={sectionHeaderStyle}>
+            <h2 style={sectionTitle}>
+              Latest Transactions
+            </h2>
 
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fit, minmax(220px, 1fr))",
-                      gap: "16px",
-                      marginBottom: "24px",
-                    }}
-                  >
-                    <QuickAction
-                      title="Customers"
-                      description="View and manage customer accounts"
-                      onClick={goToCustomers}
-                    />
+            <span style={countBadge}>
+              {transactions.length}
+            </span>
+          </div>
 
-                    <QuickAction
-                      title="Customer Support"
-                      description="View and reply to customer complaints"
-                      onClick={goToSupport}
-                    />
-                  </div>
+          {transactions.length === 0 ? (
+            <p style={emptyStyle}>
+              No transactions found.
+            </p>
+          ) : (
+            <div style={tableWrapper}>
+              <table style={tableStyle}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Date</th>
+                    <th style={thStyle}>Type</th>
+                    <th style={thStyle}>Amount</th>
+                    <th style={thStyle}>Status</th>
+                    <th style={thStyle}>Reference</th>
+                    <th style={thStyle}>Description</th>
+                  </tr>
+                </thead>
 
-                  <div
-                    style={{
-                      background: "#ffffff",
-                      border: "1px solid #e5e7eb",
-                      borderRadius: "12px",
-                      padding: "20px",
-                      marginBottom: "24px",
-                    }}
-                  >
-                    <h3
-                      style={{
-                        marginTop: 0,
-                        marginBottom: "16px",
-                      }}
-                    >
-                      Profit Summary
-                    </h3>
+                <tbody>
+                  {transactions
+                    .slice(0, 30)
+                    .map((transaction) => (
+                      <tr key={transaction.id}>
+                        <td style={tdStyle}>
+                          {formatDate(
+                            transaction.created_at
+                          )}
+                        </td>
 
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns:
-                          "repeat(auto-fit, minmax(200px, 1fr))",
-                        gap: "15px",
-                      }}
-                    >
-                      <SummaryBox
-                        label="Customer Spending"
-                        value={formatNGN(
-                          totalRevenue
-                        )}
-                      />
+                        <td style={tdStyle}>
+                          {transaction.type}
+                        </td>
 
-                      <SummaryBox
-                        label="5SIM Provider Cost"
-                        value={formatNGN(
-                          totalProviderCost
-                        )}
-                      />
+                        <td style={tdStyle}>
+                          {formatNGN(
+                            Number(transaction.amount || 0)
+                          )}
+                        </td>
 
-                      <SummaryBox
-                        label="Your Profit"
-                        value={formatNGN(totalProfit)}
-                      />
+                        <td style={tdStyle}>
+                          <StatusBadge
+                            status={
+                              transaction.status || "unknown"
+                            }
+                          />
+                        </td>
 
-                      <SummaryBox
-                        label="Available Profit"
-                        value={formatNGN(
-                          availableProfit
-                        )}
-                      />
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      background: "#ffffff",
-                      border: "1px solid #e5e7eb",
-                      borderRadius: "12px",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div
-                      style={{
-                        padding: "18px 20px",
-                        borderBottom:
-                          "1px solid #e5e7eb",
-                      }}
-                    >
-                      <h3 style={{ margin: 0 }}>
-                        Recent Orders
-                      </h3>
-                    </div>
-
-                    <OrderTable
-                      orders={orders.slice(0, 10)}
-                      formatNGN={formatNGN}
-                      formatDate={formatDate}
-                      getOrderPhone={getOrderPhone}
-                      getOrderProfit={
-                        getOrderProfit
-                      }
-                    />
-                  </div>
-                </>
-              )}
-
-              {activeSection === "orders" && (
-                <div
-                  style={{
-                    background: "#ffffff",
-                    border: "1px solid #e5e7eb",
-                    borderRadius: "12px",
-                    overflow: "hidden",
-                  }}
-                >
-                  <div
-                    style={{
-                      padding: "18px 20px",
-                      borderBottom:
-                        "1px solid #e5e7eb",
-                    }}
-                  >
-                    <h3 style={{ margin: 0 }}>
-                      All Orders
-                    </h3>
-                  </div>
-
-                  <OrderTable
-                    orders={orders}
-                    formatNGN={formatNGN}
-                    formatDate={formatDate}
-                    getOrderPhone={getOrderPhone}
-                    getOrderProfit={
-                      getOrderProfit
-                    }
-                  />
-                </div>
-              )}
-
-              {activeSection === "transactions" && (
-                <div
-                  style={{
-                    background: "#ffffff",
-                    border: "1px solid #e5e7eb",
-                    borderRadius: "12px",
-                    overflow: "hidden",
-                  }}
-                >
-                  <div
-                    style={{
-                      padding: "18px 20px",
-                      borderBottom:
-                        "1px solid #e5e7eb",
-                      display: "flex",
-                      justifyContent:
-                        "space-between",
-                      alignItems: "center",
-                      gap: "10px",
-                    }}
-                  >
-                    <div>
-                      <h3 style={{ margin: 0 }}>
-                        Wallet Transactions
-                      </h3>
-
-                      <p
-                        style={{
-                          margin: "5px 0 0",
-                          color: "#64748b",
-                          fontSize: "12px",
-                        }}
-                      >
-                        Latest transactions from all customers
-                      </p>
-                    </div>
-
-                    <span
-                      style={{
-                        fontSize: "12px",
-                        color: "#64748b",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {transactions.length.toLocaleString()} shown
-                    </span>
-                  </div>
-
-                  <div
-                    style={{
-                      overflowX: "auto",
-                    }}
-                  >
-                    <table
-                      style={{
-                        width: "100%",
-                        borderCollapse:
-                          "collapse",
-                        minWidth: "850px",
-                      }}
-                    >
-                      <thead>
-                        <tr
+                        <td
                           style={{
-                            background:
-                              "#f8fafc",
+                            ...tdStyle,
+                            maxWidth: 260,
+                            wordBreak: "break-word",
                           }}
                         >
-                          <th style={thStyle}>
-                            Date
-                          </th>
+                          {transaction.reference || "�"}
+                        </td>
 
-                          <th style={thStyle}>
-                            Customer
-                          </th>
-
-                          <th style={thStyle}>
-                            Type
-                          </th>
-
-                          <th style={thStyle}>
-                            Amount
-                          </th>
-
-                          <th style={thStyle}>
-                            Status
-                          </th>
-
-                          <th style={thStyle}>
-                            Reference
-                          </th>
-
-                          <th style={thStyle}>
-                            Description
-                          </th>
-                        </tr>
-                      </thead>
-
-                      <tbody>
-                        {transactions.length ===
-                        0 ? (
-                          <tr>
-                            <td
-                              colSpan={7}
-                              style={{
-                                padding:
-                                  "30px",
-                                textAlign:
-                                  "center",
-                                color:
-                                  "#64748b",
-                              }}
-                            >
-                              No transactions found.
-                            </td>
-                          </tr>
-                        ) : (
-                          transactions.map(
-                            (transaction) => (
-                              <tr
-                                key={
-                                  transaction.id
-                                }
-                              >
-                                <td style={tdStyle}>
-                                  {formatDate(
-                                    transaction.created_at
-                                  )}
-                                </td>
-
-                                <td
-                                  style={{
-                                    ...tdStyle,
-                                    fontSize:
-                                      "11px",
-                                    color:
-                                      "#64748b",
-                                  }}
-                                >
-                                  {transaction.user_id}
-                                </td>
-
-                                <td style={tdStyle}>
-                                  {transaction.type ||
-                                    "N/A"}
-                                </td>
-
-                                <td
-                                  style={{
-                                    ...tdStyle,
-                                    fontWeight:
-                                      800,
-                                  }}
-                                >
-                                  {formatNGN(
-                                    Number(
-                                      transaction.amount ||
-                                        0
-                                    )
-                                  )}
-                                </td>
-
-                                <td style={tdStyle}>
-                                  {transaction.status ||
-                                    "N/A"}
-                                </td>
-
-                                <td
-                                  style={{
-                                    ...tdStyle,
-                                    fontSize:
-                                      "11px",
-                                  }}
-                                >
-                                  {transaction.reference ||
-                                    "N/A"}
-                                </td>
-
-                                <td style={tdStyle}>
-                                  {transaction.description ||
-                                    "N/A"}
-                                </td>
-                              </tr>
-                            )
-                          )
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </>
+                        <td style={tdStyle}>
+                          {transaction.description || "�"}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </section>
       </div>
@@ -1052,138 +828,27 @@ export default function AdminPage() {
   );
 }
 
-function navButtonStyle(
-  active: boolean
-): React.CSSProperties {
-  return {
-    width: "100%",
-    textAlign: "left",
-    border: "none",
-    padding: "12px",
-    borderRadius: "8px",
-    cursor: "pointer",
-    background: active ? "#111827" : "#f3f4f6",
-    color: active ? "#ffffff" : "#111827",
-    fontWeight: 700,
-  };
-}
-
-function QuickAction({
-  title,
-  description,
-  onClick,
-}: {
-  title: string;
-  description: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        textAlign: "left",
-        border: "1px solid #e5e7eb",
-        background: "#ffffff",
-        borderRadius: "12px",
-        padding: "20px",
-        cursor: "pointer",
-      }}
-    >
-      <div
-        style={{
-          fontSize: "18px",
-          fontWeight: 800,
-          marginBottom: "7px",
-        }}
-      >
-        {title}
-      </div>
-
-      <div
-        style={{
-          color: "#64748b",
-          fontSize: "13px",
-        }}
-      >
-        {description}
-      </div>
-    </button>
-  );
-}
-
-function ProfitCard({
-  title,
-  value,
-  description,
-}: {
-  title: string;
-  value: string;
-  description: string;
-}) {
-  return (
-    <div
-      style={{
-        background: "#ffffff",
-        border: "1px solid #e5e7eb",
-        borderRadius: "12px",
-        padding: "20px",
-      }}
-    >
-      <div
-        style={{
-          color: "#64748b",
-          fontSize: "13px",
-          marginBottom: "8px",
-        }}
-      >
-        {title}
-      </div>
-
-      <div
-        style={{
-          fontSize: "25px",
-          fontWeight: 900,
-          marginBottom: "6px",
-        }}
-      >
-        {value}
-      </div>
-
-      <div
-        style={{
-          color: "#94a3b8",
-          fontSize: "12px",
-        }}
-      >
-        {description}
-      </div>
-    </div>
-  );
-}
-
 function StatCard({
   title,
   value,
-  description,
 }: {
   title: string;
   value: string;
-  description: string;
 }) {
   return (
     <div
       style={{
-        background: "#ffffff",
-        border: "1px solid #e5e7eb",
-        borderRadius: "12px",
-        padding: "18px",
+        background: "white",
+        borderRadius: 12,
+        padding: 20,
+        boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
       }}
     >
       <div
         style={{
-          color: "#64748b",
-          fontSize: "13px",
-          marginBottom: "8px",
+          color: "#6b7280",
+          fontSize: 13,
+          marginBottom: 8,
         }}
       >
         {title}
@@ -1191,56 +856,8 @@ function StatCard({
 
       <div
         style={{
-          fontSize: "24px",
-          fontWeight: 800,
-          marginBottom: "5px",
-        }}
-      >
-        {value}
-      </div>
-
-      <div
-        style={{
-          color: "#94a3b8",
-          fontSize: "12px",
-        }}
-      >
-        {description}
-      </div>
-    </div>
-  );
-}
-
-function SummaryBox({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div
-      style={{
-        background: "#f8fafc",
-        border: "1px solid #e5e7eb",
-        borderRadius: "10px",
-        padding: "16px",
-      }}
-    >
-      <div
-        style={{
-          color: "#64748b",
-          fontSize: "12px",
-          marginBottom: "7px",
-        }}
-      >
-        {label}
-      </div>
-
-      <div
-        style={{
-          fontSize: "20px",
-          fontWeight: 800,
+          fontSize: 22,
+          fontWeight: 700,
         }}
       >
         {value}
@@ -1249,159 +866,137 @@ function SummaryBox({
   );
 }
 
-function OrderTable({
-  orders,
-  formatNGN,
-  formatDate,
-  getOrderPhone,
-  getOrderProfit,
-}: {
-  orders: Order[];
-  formatNGN: (value: number) => string;
-  formatDate: (value: string) => string;
-  getOrderPhone: (order: Order) => string;
-  getOrderProfit: (order: Order) => number;
-}) {
+function StatusBadge({ status }: { status: string }) {
+  const normalized = status.toLowerCase();
+
+  let background = "#e5e7eb";
+  let color = "#374151";
+
+  if (
+    normalized === "completed" ||
+    normalized === "success" ||
+    normalized === "successful" ||
+    normalized === "active"
+  ) {
+    background = "#dcfce7";
+    color = "#166534";
+  }
+
+  if (
+    normalized === "pending" ||
+    normalized === "processing"
+  ) {
+    background = "#fef3c7";
+    color = "#92400e";
+  }
+
+  if (
+    normalized === "failed" ||
+    normalized === "cancelled" ||
+    normalized === "canceled" ||
+    normalized === "refunded"
+  ) {
+    background = "#fee2e2";
+    color = "#991b1b";
+  }
+
   return (
-    <div
+    <span
       style={{
-        overflowX: "auto",
+        display: "inline-block",
+        padding: "5px 9px",
+        borderRadius: 999,
+        background,
+        color,
+        fontSize: 12,
+        fontWeight: 600,
       }}
     >
-      <table
-        style={{
-          width: "100%",
-          borderCollapse: "collapse",
-          minWidth: "1050px",
-        }}
-      >
-        <thead>
-          <tr
-            style={{
-              background: "#f8fafc",
-            }}
-          >
-            <th style={thStyle}>Date</th>
-            <th style={thStyle}>Country</th>
-            <th style={thStyle}>Service</th>
-            <th style={thStyle}>Number</th>
-            <th style={thStyle}>Status</th>
-            <th style={thStyle}>Customer Price</th>
-            <th style={thStyle}>5SIM Cost</th>
-            <th style={thStyle}>Profit</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {orders.length === 0 ? (
-            <tr>
-              <td
-                colSpan={8}
-                style={{
-                  padding: "30px",
-                  textAlign: "center",
-                  color: "#64748b",
-                }}
-              >
-                No orders found.
-              </td>
-            </tr>
-          ) : (
-            orders.map((order) => {
-              const amount = Number(
-                order.amount || 0
-              );
-
-              const providerCost = Number(
-                order.provider_cost || 0
-              );
-
-              const profit =
-                getOrderProfit(order);
-
-              return (
-                <tr key={order.id}>
-                  <td style={tdStyle}>
-                    {formatDate(
-                      order.created_at
-                    )}
-                  </td>
-
-                  <td style={tdStyle}>
-                    {order.country || "N/A"}
-                  </td>
-
-                  <td style={tdStyle}>
-                    {order.service || "N/A"}
-                  </td>
-
-                  <td
-                    style={{
-                      ...tdStyle,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {getOrderPhone(order)}
-                  </td>
-
-                  <td style={tdStyle}>
-                    <span
-                      style={{
-                        display: "inline-block",
-                        padding: "5px 9px",
-                        borderRadius: "999px",
-                        background: "#f1f5f9",
-                        fontSize: "12px",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {order.status || "N/A"}
-                    </span>
-                  </td>
-
-                  <td
-                    style={{
-                      ...tdStyle,
-                      fontWeight: 800,
-                    }}
-                  >
-                    {formatNGN(amount)}
-                  </td>
-
-                  <td style={tdStyle}>
-                    {formatNGN(providerCost)}
-                  </td>
-
-                  <td
-                    style={{
-                      ...tdStyle,
-                      fontWeight: 800,
-                    }}
-                  >
-                    {formatNGN(profit)}
-                  </td>
-                </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
-    </div>
+      {status}
+    </span>
   );
 }
+
+const cardStyle: React.CSSProperties = {
+  background: "white",
+  borderRadius: 12,
+  padding: 20,
+  marginBottom: 25,
+  boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+};
+
+const sectionTitle: React.CSSProperties = {
+  margin: 0,
+  fontSize: 20,
+};
+
+const sectionHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  marginBottom: 15,
+};
+
+const countBadge: React.CSSProperties = {
+  background: "#e5e7eb",
+  color: "#374151",
+  borderRadius: 999,
+  padding: "4px 9px",
+  fontSize: 12,
+  fontWeight: 600,
+};
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  fontSize: 13,
+  fontWeight: 600,
+  marginBottom: 6,
+};
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "11px 12px",
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  fontSize: 14,
+  background: "white",
+};
+
+const navButton: React.CSSProperties = {
+  padding: "11px 16px",
+  border: "none",
+  borderRadius: 8,
+  background: "#1f2937",
+  color: "white",
+  cursor: "pointer",
+};
+
+const tableWrapper: React.CSSProperties = {
+  overflowX: "auto",
+};
+
+const tableStyle: React.CSSProperties = {
+  width: "100%",
+  borderCollapse: "collapse",
+  minWidth: 850,
+};
 
 const thStyle: React.CSSProperties = {
-  padding: "13px 14px",
   textAlign: "left",
-  fontSize: "12px",
-  color: "#64748b",
+  padding: 12,
   borderBottom: "1px solid #e5e7eb",
-  whiteSpace: "nowrap",
+  fontSize: 13,
+  background: "#f9fafb",
 };
 
 const tdStyle: React.CSSProperties = {
-  padding: "14px",
+  padding: 12,
   borderBottom: "1px solid #f1f5f9",
-  fontSize: "13px",
-  whiteSpace: "nowrap",
+  fontSize: 13,
+};
+
+const emptyStyle: React.CSSProperties = {
+  color: "#6b7280",
+  margin: 0,
 };
