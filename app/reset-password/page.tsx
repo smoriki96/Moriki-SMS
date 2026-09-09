@@ -16,39 +16,73 @@ export default function ResetPasswordPage() {
     useState<"error" | "success">("error");
 
   const [loading, setLoading] = useState(false);
-  const [checkingSession, setCheckingSession] = useState(true);
   const [recoveryMode, setRecoveryMode] = useState(false);
+  const [checkingRecovery, setCheckingRecovery] = useState(true);
 
   useEffect(() => {
-    async function checkSession() {
-      const { data } = await supabase.auth.getSession();
+    let mounted = true;
 
-      if (data.session) {
-        setRecoveryMode(true);
-      } else {
-        setRecoveryMode(false);
-      }
+    async function setupRecovery() {
+      try {
+        // Check the current URL for a Supabase recovery flow.
+        const hash = window.location.hash;
 
-      setCheckingSession(false);
-    }
+        const isRecoveryHash =
+          hash.includes("type=recovery") ||
+          hash.includes("access_token=");
 
-    checkSession();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      if (
-        event === "PASSWORD_RECOVERY" ||
-        event === "SIGNED_IN"
-      ) {
-        if (session) {
+        if (isRecoveryHash) {
           setRecoveryMode(true);
+          setCheckingRecovery(false);
+          return;
+        }
+
+        // Listen for Supabase's PASSWORD_RECOVERY event.
+        const {
+          data: { subscription },
+        } = supabase.auth.onAuthStateChange(
+          (event, session) => {
+            if (!mounted) return;
+
+            if (
+              event === "PASSWORD_RECOVERY" &&
+              session
+            ) {
+              setRecoveryMode(true);
+            }
+          }
+        );
+
+        setCheckingRecovery(false);
+
+        return () => {
+          subscription.unsubscribe();
+        };
+      } catch (error) {
+        console.error(
+          "RECOVERY CHECK ERROR:",
+          error
+        );
+
+        if (mounted) {
+          setCheckingRecovery(false);
+          setRecoveryMode(false);
         }
       }
+    }
+
+    let cleanup: (() => void) | undefined;
+
+    setupRecovery().then((cleanupFunction) => {
+      cleanup = cleanupFunction;
     });
 
     return () => {
-      subscription.unsubscribe();
+      mounted = false;
+
+      if (cleanup) {
+        cleanup();
+      }
     };
   }, []);
 
@@ -60,35 +94,59 @@ export default function ResetPasswordPage() {
     setMessage("");
     setMessageType("error");
 
-    if (!email.trim()) {
+    const cleanEmail = email.trim();
+
+    if (!cleanEmail) {
       setMessage("Please enter your email address.");
       return;
     }
 
     setLoading(true);
 
-    const redirectTo = `${window.location.origin}/reset-password`;
+    try {
+      const redirectTo =
+        `${window.location.origin}/reset-password`;
 
-    const { error } =
-      await supabase.auth.resetPasswordForEmail(
-        email.trim(),
-        {
-          redirectTo,
-        }
+      const { error } =
+        await supabase.auth.resetPasswordForEmail(
+          cleanEmail,
+          {
+            redirectTo,
+          }
+        );
+
+      if (error) {
+        console.error(
+          "PASSWORD RESET ERROR:",
+          error
+        );
+
+        setMessage(error.message);
+        setMessageType("error");
+        return;
+      }
+
+      setMessage(
+        "Reset link sent successfully. Check your email and tap the password reset link."
       );
 
-    setLoading(false);
+      setMessageType("success");
+    } catch (error) {
+      console.error(
+        "PASSWORD RESET ERROR:",
+        error
+      );
 
-    if (error) {
-      setMessage(error.message);
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong. Please try again."
+      );
+
       setMessageType("error");
-      return;
+    } finally {
+      setLoading(false);
     }
-
-    setMessage(
-      "Password reset link sent. Please check your email and tap the reset link."
-    );
-    setMessageType("success");
   }
 
   async function handleUpdatePassword(
@@ -100,17 +158,21 @@ export default function ResetPasswordPage() {
     setMessageType("error");
 
     if (!password) {
-      setMessage("Please enter a new password.");
+      setMessage("Please enter your new password.");
       return;
     }
 
     if (password.length < 6) {
-      setMessage("Password must be at least 6 characters.");
+      setMessage(
+        "Password must be at least 6 characters."
+      );
       return;
     }
 
     if (!confirmPassword) {
-      setMessage("Please confirm your new password.");
+      setMessage(
+        "Please confirm your new password."
+      );
       return;
     }
 
@@ -121,31 +183,53 @@ export default function ResetPasswordPage() {
 
     setLoading(true);
 
-    const { error } = await supabase.auth.updateUser({
-      password,
-    });
+    try {
+      const { error } =
+        await supabase.auth.updateUser({
+          password,
+        });
 
-    setLoading(false);
+      if (error) {
+        console.error(
+          "UPDATE PASSWORD ERROR:",
+          error
+        );
 
-    if (error) {
-      setMessage(error.message);
+        setMessage(error.message);
+        setMessageType("error");
+        return;
+      }
+
+      setMessage(
+        "Password updated successfully. Redirecting to login..."
+      );
+
+      setMessageType("success");
+
+      await supabase.auth.signOut();
+
+      setTimeout(() => {
+        router.replace("/login");
+      }, 1500);
+    } catch (error) {
+      console.error(
+        "UPDATE PASSWORD ERROR:",
+        error
+      );
+
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong. Please try again."
+      );
+
       setMessageType("error");
-      return;
+    } finally {
+      setLoading(false);
     }
-
-    setMessage(
-      "Password updated successfully. Redirecting to login..."
-    );
-    setMessageType("success");
-
-    await supabase.auth.signOut();
-
-    setTimeout(() => {
-      router.replace("/login");
-    }, 1500);
   }
 
-  if (checkingSession) {
+  if (checkingRecovery) {
     return (
       <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-6">
         <div className="text-center">
