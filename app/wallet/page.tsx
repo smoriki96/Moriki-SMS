@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "../../lib/supabase";
 
@@ -17,73 +17,90 @@ export default function WalletPage() {
   const [balance, setBalance] = useState(0);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+
+  const loadWallet = useCallback(
+    async (isRefresh = false) => {
+      try {
+        if (isRefresh) {
+          setRefreshing(true);
+        } else {
+          setLoading(true);
+        }
+
+        setError("");
+
+        let {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError || !user) {
+          const { data: refreshed } =
+            await supabase.auth.refreshSession();
+
+          user = refreshed.user ?? null;
+        }
+
+        if (!user) {
+          setError("Please log in to view your wallet.");
+          return;
+        }
+
+        const { data: wallet, error: walletError } =
+          await supabase
+            .from("wallets")
+            .select("balance")
+            .eq("user_id", user.id)
+            .maybeSingle();
+
+        if (walletError) {
+          throw walletError;
+        }
+
+        setBalance(Number(wallet?.balance ?? 0));
+
+        const {
+          data: transactionData,
+          error: transactionError,
+        } = await supabase
+          .from("wallet_transactions")
+          .select(
+            "id, amount, type, status, description, created_at"
+          )
+          .eq("user_id", user.id)
+          .order("created_at", {
+            ascending: false,
+          })
+          .limit(50);
+
+        if (transactionError) {
+          throw transactionError;
+        }
+
+        setTransactions(
+          (transactionData || []) as Transaction[]
+        );
+      } catch (err) {
+        console.error("WALLET ERROR:", err);
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load wallet."
+        );
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     loadWallet();
-  }, []);
-
-  async function loadWallet() {
-    try {
-      setLoading(true);
-      setError("");
-
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-
-      if (userError || !user) {
-        setError("Please log in to view your wallet.");
-        return;
-      }
-
-      const { data: wallet, error: walletError } =
-        await supabase
-          .from("wallets")
-          .select("balance")
-          .eq("user_id", user.id)
-          .maybeSingle();
-
-      if (walletError) {
-        throw walletError;
-      }
-
-      setBalance(Number(wallet?.balance ?? 0));
-
-      const {
-        data: transactionData,
-        error: transactionError,
-      } = await supabase
-        .from("wallet_transactions")
-        .select(
-          "id, amount, type, status, description, created_at"
-        )
-        .eq("user_id", user.id)
-        .order("created_at", {
-          ascending: false,
-        })
-        .limit(50);
-
-      if (transactionError) {
-        throw transactionError;
-      }
-
-      setTransactions(
-        (transactionData || []) as Transaction[]
-      );
-    } catch (err) {
-      console.error("WALLET ERROR:", err);
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to load wallet."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
+  }, [loadWallet]);
 
   function formatMoney(amount: number) {
     return `₦${amount.toLocaleString("en-NG", {
@@ -99,8 +116,14 @@ export default function WalletPage() {
     });
   }
 
+  function normalizedType(transaction: Transaction) {
+    return (
+      transaction.type?.trim().toLowerCase() || ""
+    );
+  }
+
   function isCredit(transaction: Transaction) {
-    const type = transaction.type?.toLowerCase();
+    const type = normalizedType(transaction);
 
     return (
       type === "deposit" ||
@@ -112,22 +135,59 @@ export default function WalletPage() {
   }
 
   function transactionLabel(transaction: Transaction) {
-    if (transaction.description) {
+    if (transaction.description?.trim()) {
       return transaction.description;
     }
 
-    if (isCredit(transaction)) {
+    const type = normalizedType(transaction);
+
+    if (type === "deposit" || type === "funding") {
       return "Wallet funding";
     }
 
+    if (type === "refund") {
+      return "Order refund";
+    }
+
     if (
-      transaction.type?.toLowerCase() === "purchase" ||
-      transaction.type?.toLowerCase() === "debit"
+      type === "purchase" ||
+      type === "debit"
     ) {
       return "Number purchase";
     }
 
     return "Wallet transaction";
+  }
+
+  function transactionType(transaction: Transaction) {
+    const type = normalizedType(transaction);
+
+    if (
+      type === "deposit" ||
+      type === "fund" ||
+      type === "funding"
+    ) {
+      return "Funding";
+    }
+
+    if (type === "refund") {
+      return "Refund";
+    }
+
+    if (
+      type === "purchase" ||
+      type === "debit"
+    ) {
+      return "Purchase";
+    }
+
+    return "Transaction";
+  }
+
+  function statusText(transaction: Transaction) {
+    return (
+      transaction.status?.trim() || "completed"
+    );
   }
 
   return (
@@ -172,6 +232,7 @@ export default function WalletPage() {
           display: flex;
           align-items: center;
           justify-content: space-between;
+          gap: 20px;
         }
 
         .logo {
@@ -188,6 +249,7 @@ export default function WalletPage() {
         .nav {
           display: flex;
           gap: 18px;
+          align-items: center;
         }
 
         .nav a {
@@ -228,24 +290,48 @@ export default function WalletPage() {
           font-size: 42px;
         }
 
-        .fund-button {
+        .actions {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
+        .button {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          padding: 14px 22px;
+          min-height: 46px;
+          padding: 0 18px;
           border-radius: 11px;
+          text-decoration: none;
+          font-size: 14px;
+          font-weight: 900;
+          border: 1px solid rgba(255,255,255,.08);
+          cursor: pointer;
+        }
+
+        .fund-button {
           background: linear-gradient(
             135deg,
             #1976d2,
             #2196f3
           );
           color: white;
-          text-decoration: none;
-          font-size: 15px;
-          font-weight: 900;
+        }
+
+        .refresh-button {
+          background: rgba(255,255,255,.05);
+          color: #cbd5e1;
+        }
+
+        .refresh-button:hover {
+          background: rgba(255,255,255,.09);
+          color: white;
         }
 
         .balance-card {
+          position: relative;
+          overflow: hidden;
           padding: 30px;
           border-radius: 20px;
           background:
@@ -255,6 +341,17 @@ export default function WalletPage() {
               rgba(15,23,42,.96)
             );
           border: 1px solid rgba(33,150,243,.28);
+        }
+
+        .balance-card::after {
+          content: "";
+          position: absolute;
+          width: 180px;
+          height: 180px;
+          right: -70px;
+          top: -80px;
+          border-radius: 50%;
+          background: rgba(33,150,243,.10);
         }
 
         .balance-label {
@@ -267,6 +364,7 @@ export default function WalletPage() {
           margin-top: 10px;
           font-size: 42px;
           font-weight: 900;
+          letter-spacing: -1px;
         }
 
         .balance-note {
@@ -279,10 +377,23 @@ export default function WalletPage() {
           margin-top: 30px;
         }
 
-        .section-title {
+        .section-heading {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 15px;
           margin-bottom: 15px;
+        }
+
+        .section-title {
           font-size: 21px;
           font-weight: 900;
+        }
+
+        .count {
+          color: #64748b;
+          font-size: 12px;
+          font-weight: 700;
         }
 
         .transactions {
@@ -312,12 +423,30 @@ export default function WalletPage() {
         .transaction-title {
           font-weight: 800;
           font-size: 15px;
+          color: #f8fafc;
+        }
+
+        .transaction-meta {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-top: 7px;
         }
 
         .transaction-date {
-          margin-top: 6px;
           color: #64748b;
           font-size: 12px;
+        }
+
+        .type-label {
+          padding: 3px 7px;
+          border-radius: 999px;
+          background: rgba(255,255,255,.05);
+          color: #94a3b8;
+          font-size: 9px;
+          font-weight: 900;
+          text-transform: uppercase;
         }
 
         .transaction-right {
@@ -351,7 +480,7 @@ export default function WalletPage() {
         }
 
         .empty {
-          padding: 45px 20px;
+          padding: 55px 20px;
           text-align: center;
           color: #64748b;
         }
@@ -363,24 +492,58 @@ export default function WalletPage() {
           font-weight: 800;
         }
 
+        .empty-link {
+          display: inline-block;
+          margin-top: 18px;
+          color: #60a5fa;
+          text-decoration: none;
+          font-size: 13px;
+          font-weight: 800;
+        }
+
         .error {
-          margin-top: 20px;
+          margin-bottom: 20px;
           padding: 15px;
           border-radius: 10px;
           background: rgba(127,29,29,.30);
           border: 1px solid rgba(248,113,113,.30);
           color: #fecaca;
+          font-size: 14px;
         }
 
         .loading {
-          padding: 50px 20px;
+          padding: 60px 20px;
           text-align: center;
           color: #94a3b8;
+        }
+
+        .spinner {
+          width: 24px;
+          height: 24px;
+          margin: 0 auto 12px;
+          border: 3px solid rgba(255,255,255,.10);
+          border-top-color: #2196f3;
+          border-radius: 50%;
+          animation: spin .8s linear infinite;
+        }
+
+        @keyframes spin {
+          to {
+            transform: rotate(360deg);
+          }
         }
 
         @media (max-width: 650px) {
           .header-inner {
             padding: 16px;
+          }
+
+          .nav {
+            gap: 10px;
+          }
+
+          .nav a {
+            font-size: 12px;
           }
 
           .container {
@@ -396,8 +559,12 @@ export default function WalletPage() {
             font-size: 34px;
           }
 
-          .fund-button {
+          .actions {
             width: 100%;
+          }
+
+          .button {
+            flex: 1;
           }
 
           .balance {
@@ -405,7 +572,16 @@ export default function WalletPage() {
           }
 
           .transaction {
+            align-items: flex-start;
             padding: 17px 14px;
+          }
+
+          .transaction-right {
+            min-width: 90px;
+          }
+
+          .amount {
+            font-size: 14px;
           }
         }
       `}</style>
@@ -417,9 +593,17 @@ export default function WalletPage() {
           </Link>
 
           <nav className="nav">
-            <Link href="/">Home</Link>
-            <Link href="/numbers">Numbers</Link>
-            <Link href="/orders">Orders</Link>
+            <Link href="/dashboard">
+              Dashboard
+            </Link>
+
+            <Link href="/numbers">
+              Numbers
+            </Link>
+
+            <Link href="/orders">
+              Orders
+            </Link>
           </nav>
         </div>
       </header>
@@ -434,12 +618,25 @@ export default function WalletPage() {
             <h1>My Wallet</h1>
           </div>
 
-          <Link
-            href="/wallet/fund"
-            className="fund-button"
-          >
-            + Fund Wallet
-          </Link>
+          <div className="actions">
+            <button
+              type="button"
+              className="button refresh-button"
+              onClick={() => loadWallet(true)}
+              disabled={refreshing}
+            >
+              {refreshing
+                ? "Refreshing..."
+                : "↻ Refresh"}
+            </button>
+
+            <Link
+              href="/wallet/fund"
+              className="button fund-button"
+            >
+              + Fund Wallet
+            </Link>
+          </div>
         </div>
 
         {error && (
@@ -450,6 +647,7 @@ export default function WalletPage() {
 
         {loading ? (
           <div className="loading">
+            <div className="spinner" />
             Loading wallet...
           </div>
         ) : (
@@ -470,8 +668,14 @@ export default function WalletPage() {
             </section>
 
             <section className="section">
-              <div className="section-title">
-                Transactions
+              <div className="section-heading">
+                <div className="section-title">
+                  Transactions
+                </div>
+
+                <div className="count">
+                  {transactions.length} recent
+                </div>
               </div>
 
               <div className="transactions">
@@ -485,6 +689,13 @@ export default function WalletPage() {
                       Your wallet transactions
                       will appear here.
                     </div>
+
+                    <Link
+                      href="/wallet/fund"
+                      className="empty-link"
+                    >
+                      Fund your wallet →
+                    </Link>
                   </div>
                 ) : (
                   transactions.map((transaction) => {
@@ -503,10 +714,18 @@ export default function WalletPage() {
                             )}
                           </div>
 
-                          <div className="transaction-date">
-                            {formatDate(
-                              transaction.created_at
-                            )}
+                          <div className="transaction-meta">
+                            <span className="type-label">
+                              {transactionType(
+                                transaction
+                              )}
+                            </span>
+
+                            <span className="transaction-date">
+                              {formatDate(
+                                transaction.created_at
+                              )}
+                            </span>
                           </div>
                         </div>
 
@@ -529,8 +748,7 @@ export default function WalletPage() {
                           </div>
 
                           <div className="status">
-                            {transaction.status ||
-                              "completed"}
+                            {statusText(transaction)}
                           </div>
                         </div>
                       </div>
