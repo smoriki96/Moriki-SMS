@@ -7,225 +7,356 @@ import { supabase } from "../../lib/supabase";
 const ADMIN_EMAIL = "namoriki30@gmail.com";
 
 type Order = {
-  id: string;
-  user_id: string;
-  country: string;
-  service: string;
-  amount: number;
-  payment_reference: string | null;
-  payment_status: string | null;
-  order_status: string | null;
-  status: string | null;
-  created_at: string;
-  payment: string | null;
-  phone_id: string | null;
-  phone_number: string | null;
-  verification_code: string | null;
-  fivesim_order_id: number | null;
-  provider_cost: number | null;
+  id?: string | number;
+  user_id?: string;
+  phone_number?: string;
+  phone_id?: string | number;
+  country?: string;
+  service?: string;
+  status?: string;
+  amount?: number | string;
+  provider_cost?: number | string;
+  profit?: number | string;
+  payment_reference?: string;
+  fivesim_order_id?: string | number;
+  verification_code?: string;
+  created_at?: string;
 };
 
 type Wallet = {
-  user_id: string;
-  balance: number;
+  user_id?: string;
+  balance?: number | string;
 };
 
 type Transaction = {
-  id: string;
-  user_id: string;
-  type: string;
-  amount: number;
-  status: string | null;
-  reference: string | null;
-  description: string | null;
-  created_at: string;
+  id?: string | number;
+  user_id?: string;
+  type?: string;
+  amount?: number | string;
+  balance_before?: number | string;
+  balance_after?: number | string;
+  reference?: string;
+  description?: string;
+  created_at?: string;
 };
 
 type Customer = {
   id: string;
-  email: string;
-  name: string;
+  email?: string;
+  user_metadata?: {
+    full_name?: string;
+    name?: string;
+  };
 };
 
-function formatNGN(value: number) {
-  return `NGN ${Number(value || 0).toLocaleString("en-NG", {
-    minimumFractionDigits: 0,
+type DashboardData = {
+  success?: boolean;
+  orders?: Order[];
+  wallets?: Wallet[];
+  transactions?: Transaction[];
+  stats?: {
+    totalRevenue?: number;
+    totalProviderCost?: number;
+    totalProfit?: number;
+    totalWalletFunds?: number;
+    totalOrders?: number;
+    activeOrders?: number;
+    refundedOrders?: number;
+  };
+  error?: string;
+};
+
+function formatNGN(value: unknown) {
+  const amount = Number(value ?? 0);
+
+  if (!Number.isFinite(amount)) {
+    return "NGN 0";
+  }
+
+  return `NGN ${amount.toLocaleString("en-NG", {
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
 }
 
-function formatDate(value: string) {
-  return new Date(value).toLocaleString("en-NG", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+function formatDate(value: unknown) {
+  if (!value) return "-";
+
+  const date = new Date(String(value));
+
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  return date.toLocaleString("en-NG");
+}
+
+function getStatus(value: unknown) {
+  if (!value) return "UNKNOWN";
+
+  return String(value).replace(/_/g, " ").toUpperCase();
+}
+
+async function readJson(response: Response) {
+  const text = await response.text();
+
+  const contentType =
+    response.headers.get("content-type") || "";
+
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new Error(
+      `Server returned ${response.status} instead of JSON.`
+    );
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      "Server returned an invalid JSON response."
+    );
+  }
 }
 
 export default function AdminDashboard() {
   const router = useRouter();
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
   const [orders, setOrders] = useState<Order[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactions, setTransactions] =
+    useState<Transaction[]>([]);
 
-  const [totalRevenue, setTotalRevenue] = useState(0);
-  const [totalProviderCost, setTotalProviderCost] = useState(0);
-  const [totalProfit, setTotalProfit] = useState(0);
-  const [totalWalletFunds, setTotalWalletFunds] = useState(0);
-  const [totalOrders, setTotalOrders] = useState(0);
-  const [activeOrders, setActiveOrders] = useState(0);
-  const [refundedOrders, setRefundedOrders] = useState(0);
+  const [customers, setCustomers] =
+    useState<Customer[]>([]);
 
-  const [errorMessage, setErrorMessage] = useState("");
+  const [stats, setStats] = useState({
+    totalRevenue: 0,
+    totalProviderCost: 0,
+    totalProfit: 0,
+    totalWalletFunds: 0,
+    totalOrders: 0,
+    activeOrders: 0,
+    refundedOrders: 0,
+  });
 
-  // Notification form
-  const [notificationTitle, setNotificationTitle] = useState("");
-  const [notificationMessage, setNotificationMessage] = useState("");
-  const [notificationType, setNotificationType] = useState<
-    "info" | "warning" | "success" | "security"
-  >("warning");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const [notificationTitle, setNotificationTitle] =
+    useState("");
+
+  const [notificationMessage, setNotificationMessage] =
+    useState("");
+
+  const [notificationType, setNotificationType] =
+    useState<
+      "info" | "warning" | "success" | "security"
+    >("info");
 
   const [notificationRecipient, setNotificationRecipient] =
-    useState("all");
+    useState<"all" | "customer">("all");
 
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [selectedCustomer, setSelectedCustomer] = useState("");
-  const [sendingNotification, setSendingNotification] = useState(false);
-  const [notificationResult, setNotificationResult] = useState("");
+  const [selectedCustomer, setSelectedCustomer] =
+    useState("");
 
-  async function loadDashboard(showRefresh = false) {
+  const [sendingNotification, setSendingNotification] =
+    useState(false);
+
+  const [notificationResult, setNotificationResult] =
+    useState("");
+
+  async function getAccessToken() {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      throw new Error("Your login session has expired.");
+    }
+
+    return session.access_token;
+  }
+
+  async function loadDashboard() {
     try {
-      if (showRefresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-
-      setErrorMessage("");
+      setLoading(true);
+      setError("");
 
       const {
         data: { user },
-        error: userError,
       } = await supabase.auth.getUser();
 
-      if (userError || !user) {
+      if (!user?.email) {
         router.replace("/login");
         return;
       }
 
       if (
-        !user.email ||
-        user.email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()
+        user.email.toLowerCase() !==
+        ADMIN_EMAIL.toLowerCase()
       ) {
-        router.replace("/login");
+        router.replace("/dashboard");
         return;
       }
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const token = await getAccessToken();
 
-      if (!session?.access_token) {
-        router.replace("/login");
-        return;
-      }
+      const response = await fetch(
+        "/api/admin/dashboard",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          cache: "no-store",
+        }
+      );
 
-      const response = await fetch("/api/admin/dashboard", {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        cache: "no-store",
-      });
+      const data: DashboardData =
+        await readJson(response);
 
-      const data = await response.json();
-
-      if (!response.ok) {
+      if (!response.ok || data.success === false) {
         throw new Error(
-          data?.error || "Could not load admin dashboard."
+          data.error ||
+            "Unable to load admin dashboard."
         );
       }
 
-      setOrders(data.orders || []);
-      setWallets(data.wallets || []);
-      setTransactions(data.transactions || []);
+      setOrders(
+        Array.isArray(data.orders)
+          ? data.orders
+          : []
+      );
 
-      const stats = data.stats || {};
+      setWallets(
+        Array.isArray(data.wallets)
+          ? data.wallets
+          : []
+      );
 
-      setTotalRevenue(Number(stats.totalRevenue || 0));
-      setTotalProviderCost(Number(stats.totalProviderCost || 0));
-      setTotalProfit(Number(stats.totalProfit || 0));
-      setTotalWalletFunds(Number(stats.totalWalletFunds || 0));
-      setTotalOrders(Number(stats.totalOrders || 0));
-      setActiveOrders(Number(stats.activeOrders || 0));
-      setRefundedOrders(Number(stats.refundedOrders || 0));
-    } catch (error) {
-      console.error("ADMIN DASHBOARD ERROR:", error);
+      setStats({
+        totalRevenue: Number(
+          data.stats?.totalRevenue ?? 0
+        ),
+        totalProviderCost: Number(
+          data.stats?.totalProviderCost ?? 0
+        ),
+        totalProfit: Number(
+          data.stats?.totalProfit ?? 0
+        ),
+        totalWalletFunds: Number(
+          data.stats?.totalWalletFunds ?? 0
+        ),
+        totalOrders: Number(
+          data.stats?.totalOrders ??
+            data.orders?.length ??
+            0
+        ),
+        activeOrders: Number(
+          data.stats?.activeOrders ?? 0
+        ),
+        refundedOrders: Number(
+          data.stats?.refundedOrders ?? 0
+        ),
+      });
 
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "Something went wrong."
+      // Load the latest transactions from the
+      // dedicated protected transaction endpoint.
+      const transactionResponse = await fetch(
+        "/api/admin/transactions",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          cache: "no-store",
+        }
+      );
+
+      const transactionData =
+        await readJson(transactionResponse);
+
+      if (
+        !transactionResponse.ok ||
+        transactionData.success === false
+      ) {
+        throw new Error(
+          transactionData.error ||
+            "Unable to load latest transactions."
+        );
+      }
+
+      setTransactions(
+        Array.isArray(
+          transactionData.transactions
+        )
+          ? transactionData.transactions
+          : []
+      );
+    } catch (err) {
+      console.error("ADMIN DASHBOARD ERROR:", err);
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load admin dashboard."
       );
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   }
 
   async function loadCustomers() {
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const token = await getAccessToken();
 
-      if (!session?.access_token) return;
+      const response = await fetch(
+        "/api/admin/customers",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          cache: "no-store",
+        }
+      );
 
-      const response = await fetch("/api/admin/customers", {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        cache: "no-store",
-      });
+      const data = await readJson(response);
 
-      if (!response.ok) return;
-
-      const data = await response.json();
-
-      const list = Array.isArray(data.customers)
-        ? data.customers
-        : [];
+      if (!response.ok || data.success === false) {
+        throw new Error(
+          data.error ||
+            "Unable to load customers."
+        );
+      }
 
       setCustomers(
-        list.map((customer: any) => ({
-          id: customer.id,
-          email: customer.email || "",
-          name:
-            customer.name ||
-            customer.user_metadata?.full_name ||
-            customer.user_metadata?.name ||
-            customer.email ||
-            "Customer",
-        }))
+        Array.isArray(data.customers)
+          ? data.customers
+          : []
       );
-    } catch (error) {
-      console.error("CUSTOMERS LOAD ERROR:", error);
+    } catch (err) {
+      console.error("CUSTOMERS ERROR:", err);
     }
   }
 
   async function sendNotification() {
     setNotificationResult("");
 
-    if (!notificationTitle.trim()) {
-      setNotificationResult("Please enter a notification title.");
+    const title = notificationTitle.trim();
+    const message = notificationMessage.trim();
+
+    if (!title) {
+      setNotificationResult(
+        "Please enter a notification title."
+      );
       return;
     }
 
-    if (!notificationMessage.trim()) {
-      setNotificationResult("Please enter a notification message.");
+    if (!message) {
+      setNotificationResult(
+        "Please enter a notification message."
+      );
       return;
     }
 
@@ -233,63 +364,63 @@ export default function AdminDashboard() {
       notificationRecipient === "customer" &&
       !selectedCustomer
     ) {
-      setNotificationResult("Please select a customer.");
+      setNotificationResult(
+        "Please select a customer."
+      );
       return;
     }
 
     try {
       setSendingNotification(true);
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const token = await getAccessToken();
 
-      if (!session?.access_token) {
-        setNotificationResult("Your admin session has expired.");
-        return;
-      }
+      const response = await fetch(
+        "/api/admin/notifications",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            title,
+            message,
+            type: notificationType,
+            user_id:
+              notificationRecipient === "all"
+                ? null
+                : selectedCustomer,
+          }),
+        }
+      );
 
-      const response = await fetch("/api/admin/notifications", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          title: notificationTitle.trim(),
-          message: notificationMessage.trim(),
-          type: notificationType,
-          user_id:
-            notificationRecipient === "all"
-              ? null
-              : selectedCustomer,
-        }),
-      });
+      const data = await readJson(response);
 
-      const data = await response.json();
-
-      if (!response.ok) {
+      if (!response.ok || data.success === false) {
         throw new Error(
-          data?.error || "Could not send notification."
+          data.error ||
+            "Unable to send notification."
         );
       }
 
       setNotificationResult(
-        notificationRecipient === "all"
-          ? "Notification sent to all customers."
-          : "Notification sent successfully."
+        "Notification sent successfully."
       );
 
       setNotificationTitle("");
       setNotificationMessage("");
       setSelectedCustomer("");
-    } catch (error) {
-      console.error("SEND NOTIFICATION ERROR:", error);
+    } catch (err) {
+      console.error(
+        "NOTIFICATION ERROR:",
+        err
+      );
 
       setNotificationResult(
-        error instanceof Error
-          ? error.message
-          : "Could not send notification."
+        err instanceof Error
+          ? err.message
+          : "Unable to send notification."
       );
     } finally {
       setSendingNotification(false);
@@ -306,319 +437,323 @@ export default function AdminDashboard() {
     loadCustomers();
   }, []);
 
-  if (loading) {
-    return (
-      <main
-        style={{
-          minHeight: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#f5f7fb",
-          fontFamily: "Arial, sans-serif",
-        }}
-      >
-        <div style={{ fontSize: 18 }}>Loading admin dashboard...</div>
-      </main>
-    );
-  }
-
   return (
     <main
       style={{
         minHeight: "100vh",
         background: "#f5f7fb",
-        fontFamily: "Arial, sans-serif",
         color: "#111827",
+        padding: "24px",
       }}
     >
-      <header
-        style={{
-          background: "#111827",
-          color: "white",
-          padding: "18px 24px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 15,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <h1 style={{ margin: 0, fontSize: 25 }}>
-            Moriki SMS Admin
-          </h1>
-
-          <p
-            style={{
-              margin: "5px 0 0",
-              opacity: 0.75,
-              fontSize: 13,
-            }}
-          >
-            Administration Dashboard
-          </p>
-        </div>
-
-        <div style={{ display: "flex", gap: 10 }}>
-          <button
-            onClick={() => loadDashboard(true)}
-            disabled={refreshing}
-            style={{
-              padding: "10px 15px",
-              borderRadius: 8,
-              border: "1px solid #4b5563",
-              background: "#1f2937",
-              color: "white",
-              cursor: refreshing ? "not-allowed" : "pointer",
-            }}
-          >
-            {refreshing ? "Refreshing..." : "Refresh"}
-          </button>
-
-          <button
-            onClick={logout}
-            style={{
-              padding: "10px 15px",
-              borderRadius: 8,
-              border: "none",
-              background: "#dc2626",
-              color: "white",
-              cursor: "pointer",
-            }}
-          >
-            Logout
-          </button>
-        </div>
-      </header>
-
       <div
         style={{
-          maxWidth: 1400,
+          maxWidth: "1400px",
           margin: "0 auto",
-          padding: 24,
         }}
       >
-        {errorMessage && (
+        {/* HEADER */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "16px",
+            flexWrap: "wrap",
+            marginBottom: "24px",
+          }}
+        >
+          <div>
+            <h1
+              style={{
+                margin: 0,
+                fontSize: "30px",
+                fontWeight: 800,
+              }}
+            >
+              Moriki SMS Admin
+            </h1>
+
+            <p
+              style={{
+                marginTop: "6px",
+                color: "#6b7280",
+              }}
+            >
+              Manage customers, orders,
+              transactions and notifications.
+            </p>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              gap: "10px",
+              flexWrap: "wrap",
+            }}
+          >
+            <button
+              onClick={loadDashboard}
+              style={buttonStyle}
+            >
+              Refresh
+            </button>
+
+            <button
+              onClick={() => router.push("/admin/customers")}
+              style={buttonStyle}
+            >
+              Customers
+            </button>
+
+            <button
+              onClick={() => router.push("/admin/support")}
+              style={buttonStyle}
+            >
+              Support
+            </button>
+
+            <button
+              onClick={logout}
+              style={{
+                ...buttonStyle,
+                background: "#111827",
+                color: "#fff",
+              }}
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+
+        {/* ERROR */}
+        {error && (
           <div
             style={{
               background: "#fee2e2",
               color: "#991b1b",
-              padding: 14,
-              borderRadius: 10,
-              marginBottom: 20,
+              padding: "14px 16px",
+              borderRadius: "10px",
+              marginBottom: "20px",
+              fontWeight: 600,
             }}
           >
-            {errorMessage}
+            {error}
           </div>
         )}
 
         {/* STATS */}
-        <section
+        <div
           style={{
             display: "grid",
             gridTemplateColumns:
-              "repeat(auto-fit,minmax(190px,1fr))",
-            gap: 15,
-            marginBottom: 25,
+              "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: "14px",
+            marginBottom: "24px",
           }}
         >
           <StatCard
-            title="Total Revenue"
-            value={formatNGN(totalRevenue)}
+            title="Revenue"
+            value={formatNGN(stats.totalRevenue)}
           />
 
           <StatCard
-            title="5SIM Cost"
-            value={formatNGN(totalProviderCost)}
+            title="Provider Cost"
+            value={formatNGN(
+              stats.totalProviderCost
+            )}
           />
 
           <StatCard
-            title="Total Profit"
-            value={formatNGN(totalProfit)}
+            title="Profit"
+            value={formatNGN(stats.totalProfit)}
           />
 
           <StatCard
             title="Wallet Funds"
-            value={formatNGN(totalWalletFunds)}
+            value={formatNGN(
+              stats.totalWalletFunds
+            )}
           />
 
           <StatCard
             title="Total Orders"
-            value={String(totalOrders)}
+            value={String(stats.totalOrders)}
           />
 
           <StatCard
             title="Active Orders"
-            value={String(activeOrders)}
+            value={String(stats.activeOrders)}
           />
 
           <StatCard
-            title="Refunded / Cancelled"
-            value={String(refundedOrders)}
+            title="Refunded Orders"
+            value={String(stats.refundedOrders)}
           />
-        </section>
+        </div>
 
-        {/* NAVIGATION */}
+        {/* NOTIFICATION */}
         <section
           style={{
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
-            marginBottom: 25,
+            background: "#ffffff",
+            borderRadius: "14px",
+            padding: "22px",
+            marginBottom: "24px",
+            border: "1px solid #e5e7eb",
           }}
         >
-          <button
-            onClick={() => router.push("/admin/customers")}
-            style={navButton}
+          <h2
+            style={{
+              marginTop: 0,
+              marginBottom: "6px",
+              fontSize: "21px",
+            }}
           >
-            Customers
-          </button>
-
-          <button
-            onClick={() => router.push("/admin/support")}
-            style={navButton}
-          >
-            Support
-          </button>
-        </section>
-
-        {/* CREATE NOTIFICATION */}
-        <section style={cardStyle}>
-          <h2 style={sectionTitle}>
-            ?? Create Customer Notification
+            Create Customer Notification
           </h2>
 
           <p
             style={{
               color: "#6b7280",
-              fontSize: 14,
               marginTop: 0,
             }}
           >
-            Send a one-time notification directly to customers.
+            Send an announcement or security
+            message to all customers or one
+            customer.
           </p>
 
           <div
             style={{
               display: "grid",
               gridTemplateColumns:
-                "repeat(auto-fit,minmax(220px,1fr))",
-              gap: 15,
+                "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: "14px",
             }}
           >
-            <div>
-              <label style={labelStyle}>Title</label>
+            <input
+              value={notificationTitle}
+              onChange={(e) =>
+                setNotificationTitle(
+                  e.target.value
+                )
+              }
+              placeholder="Notification title"
+              style={inputStyle}
+            />
 
-              <input
-                value={notificationTitle}
-                onChange={(e) =>
-                  setNotificationTitle(e.target.value)
-                }
-                placeholder="Important security warning"
-                style={inputStyle}
-              />
-            </div>
+            <select
+              value={notificationType}
+              onChange={(e) =>
+                setNotificationType(
+                  e.target.value as
+                    | "info"
+                    | "warning"
+                    | "success"
+                    | "security"
+                )
+              }
+              style={inputStyle}
+            >
+              <option value="info">Info</option>
+              <option value="warning">
+                Warning
+              </option>
+              <option value="success">
+                Success
+              </option>
+              <option value="security">
+                Security
+              </option>
+            </select>
 
-            <div>
-              <label style={labelStyle}>Type</label>
+            <select
+              value={notificationRecipient}
+              onChange={(e) => {
+                setNotificationRecipient(
+                  e.target.value as
+                    | "all"
+                    | "customer"
+                );
 
+                setSelectedCustomer("");
+              }}
+              style={inputStyle}
+            >
+              <option value="all">
+                Send to all customers
+              </option>
+
+              <option value="customer">
+                Send to one customer
+              </option>
+            </select>
+
+            {notificationRecipient ===
+              "customer" && (
               <select
-                value={notificationType}
+                value={selectedCustomer}
                 onChange={(e) =>
-                  setNotificationType(
-                    e.target.value as
-                      | "info"
-                      | "warning"
-                      | "success"
-                      | "security"
+                  setSelectedCustomer(
+                    e.target.value
                   )
                 }
                 style={inputStyle}
               >
-                <option value="info">Information</option>
-                <option value="warning">Warning</option>
-                <option value="success">Success</option>
-                <option value="security">Security</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={labelStyle}>Send To</label>
-
-              <select
-                value={notificationRecipient}
-                onChange={(e) =>
-                  setNotificationRecipient(e.target.value)
-                }
-                style={inputStyle}
-              >
-                <option value="all">All Customers</option>
-                <option value="customer">
-                  Specific Customer
+                <option value="">
+                  Select customer
                 </option>
-              </select>
-            </div>
 
-            {notificationRecipient === "customer" && (
-              <div>
-                <label style={labelStyle}>Customer</label>
-
-                <select
-                  value={selectedCustomer}
-                  onChange={(e) =>
-                    setSelectedCustomer(e.target.value)
-                  }
-                  style={inputStyle}
-                >
-                  <option value="">
-                    Select customer
+                {customers.map((customer) => (
+                  <option
+                    key={customer.id}
+                    value={customer.id}
+                  >
+                    {customer.email ||
+                      customer.user_metadata
+                        ?.full_name ||
+                      customer.id}
                   </option>
-
-                  {customers.map((customer) => (
-                    <option
-                      key={customer.id}
-                      value={customer.id}
-                    >
-                      {customer.name} � {customer.email}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                ))}
+              </select>
             )}
           </div>
 
-          <div style={{ marginTop: 15 }}>
-            <label style={labelStyle}>Message</label>
-
-            <textarea
-              value={notificationMessage}
-              onChange={(e) =>
-                setNotificationMessage(e.target.value)
-              }
-              placeholder="Your message to the customer..."
-              rows={4}
-              style={{
-                ...inputStyle,
-                resize: "vertical",
-              }}
-            />
-          </div>
+          <textarea
+            value={notificationMessage}
+            onChange={(e) =>
+              setNotificationMessage(
+                e.target.value
+              )
+            }
+            placeholder="Write your notification message..."
+            rows={5}
+            style={{
+              ...inputStyle,
+              width: "100%",
+              marginTop: "14px",
+              resize: "vertical",
+              boxSizing: "border-box",
+            }}
+          />
 
           <button
             onClick={sendNotification}
             disabled={sendingNotification}
             style={{
-              marginTop: 15,
-              padding: "12px 18px",
+              marginTop: "14px",
+              padding: "12px 20px",
               border: "none",
-              borderRadius: 8,
-              background: "#2563eb",
-              color: "white",
-              fontWeight: 600,
+              borderRadius: "9px",
+              background: "#111827",
+              color: "#ffffff",
+              fontWeight: 700,
               cursor: sendingNotification
                 ? "not-allowed"
                 : "pointer",
+              opacity: sendingNotification
+                ? 0.6
+                : 1,
             }}
           >
             {sendingNotification
@@ -629,25 +764,21 @@ export default function AdminDashboard() {
           {notificationResult && (
             <div
               style={{
-                marginTop: 12,
-                padding: 12,
-                borderRadius: 8,
-                background: notificationResult
-                  .toLowerCase()
-                  .includes("successfully") ||
-                notificationResult
-                  .toLowerCase()
-                  .includes("sent")
-                  ? "#dcfce7"
-                  : "#fee2e2",
-                color: notificationResult
-                  .toLowerCase()
-                  .includes("successfully") ||
-                notificationResult
-                  .toLowerCase()
-                  .includes("sent")
-                  ? "#166534"
-                  : "#991b1b",
+                marginTop: "14px",
+                padding: "12px",
+                borderRadius: "8px",
+                background:
+                  notificationResult.includes(
+                    "successfully"
+                  )
+                    ? "#dcfce7"
+                    : "#fee2e2",
+                color:
+                  notificationResult.includes(
+                    "successfully"
+                  )
+                    ? "#166534"
+                    : "#991b1b",
               }}
             >
               {notificationResult}
@@ -655,172 +786,274 @@ export default function AdminDashboard() {
           )}
         </section>
 
-        {/* LATEST ORDERS */}
-        <section style={cardStyle}>
-          <div style={sectionHeaderStyle}>
-            <h2 style={sectionTitle}>
+        {/* ORDERS */}
+        <section
+          style={{
+            background: "#ffffff",
+            borderRadius: "14px",
+            padding: "22px",
+            marginBottom: "24px",
+            border: "1px solid #e5e7eb",
+            overflowX: "auto",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "16px",
+            }}
+          >
+            <h2
+              style={{
+                margin: 0,
+                fontSize: "21px",
+              }}
+            >
               Latest Orders
             </h2>
 
-            <span style={countBadge}>
-              {orders.length}
+            <span
+              style={{
+                color: "#6b7280",
+                fontSize: "14px",
+              }}
+            >
+              {orders.length} loaded
             </span>
           </div>
 
-          {orders.length === 0 ? (
-            <p style={emptyStyle}>No orders found.</p>
+          {loading ? (
+            <p>Loading orders...</p>
+          ) : orders.length === 0 ? (
+            <p
+              style={{
+                color: "#6b7280",
+              }}
+            >
+              No orders found.
+            </p>
           ) : (
-            <div style={tableWrapper}>
-              <table style={tableStyle}>
-                <thead>
-                  <tr>
-                    <th style={thStyle}>Date</th>
-                    <th style={thStyle}>Country</th>
-                    <th style={thStyle}>Service</th>
-                    <th style={thStyle}>Number</th>
-                    <th style={thStyle}>Status</th>
-                    <th style={thStyle}>Customer Price</th>
-                    <th style={thStyle}>5SIM Cost</th>
-                    <th style={thStyle}>Profit</th>
-                  </tr>
-                </thead>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: "950px",
+              }}
+            >
+              <thead>
+                <tr>
+                  <th style={thStyle}>Date</th>
+                  <th style={thStyle}>Phone</th>
+                  <th style={thStyle}>Country</th>
+                  <th style={thStyle}>Service</th>
+                  <th style={thStyle}>Amount</th>
+                  <th style={thStyle}>
+                    Provider Cost
+                  </th>
+                  <th style={thStyle}>Profit</th>
+                  <th style={thStyle}>Status</th>
+                </tr>
+              </thead>
 
-                <tbody>
-                  {orders.slice(0, 20).map((order) => {
-                    const providerCost = Number(
-                      order.provider_cost || 0
-                    );
+              <tbody>
+                {orders.map((order, index) => {
+                  const amount = Number(
+                    order.amount ?? 0
+                  );
 
-                    const amount = Number(order.amount || 0);
+                  const providerCost = Number(
+                    order.provider_cost ?? 0
+                  );
 
-                    const profit =
-                      amount - providerCost;
+                  const profit =
+                    order.profit !== undefined
+                      ? Number(order.profit)
+                      : amount -
+                        providerCost;
 
-                    return (
-                      <tr key={order.id}>
-                        <td style={tdStyle}>
-                          {formatDate(order.created_at)}
-                        </td>
+                  return (
+                    <tr
+                      key={
+                        order.id ??
+                        `${order.created_at}-${index}`
+                      }
+                    >
+                      <td style={tdStyle}>
+                        {formatDate(
+                          order.created_at
+                        )}
+                      </td>
 
-                        <td style={tdStyle}>
-                          {order.country}
-                        </td>
+                      <td style={tdStyle}>
+                        {order.phone_number ||
+                          "-"}
+                      </td>
 
-                        <td style={tdStyle}>
-                          {order.service}
-                        </td>
+                      <td style={tdStyle}>
+                        {order.country || "-"}
+                      </td>
 
-                        <td style={tdStyle}>
-                          {order.phone_number || "�"}
-                        </td>
+                      <td style={tdStyle}>
+                        {order.service || "-"}
+                      </td>
 
-                        <td style={tdStyle}>
-                          <StatusBadge
-                            status={
-                              order.status ||
-                              order.order_status ||
-                              "unknown"
-                            }
-                          />
-                        </td>
+                      <td style={tdStyle}>
+                        {formatNGN(amount)}
+                      </td>
 
-                        <td style={tdStyle}>
-                          {formatNGN(amount)}
-                        </td>
+                      <td style={tdStyle}>
+                        {formatNGN(
+                          providerCost
+                        )}
+                      </td>
 
-                        <td style={tdStyle}>
-                          {formatNGN(providerCost)}
-                        </td>
+                      <td style={tdStyle}>
+                        {formatNGN(profit)}
+                      </td>
 
-                        <td style={tdStyle}>
-                          {formatNGN(profit)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                      <td style={tdStyle}>
+                        {getStatus(
+                          order.status
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
         </section>
 
-        {/* LATEST TRANSACTIONS */}
-        <section style={cardStyle}>
-          <div style={sectionHeaderStyle}>
-            <h2 style={sectionTitle}>
-              Latest Transactions
+        {/* TRANSACTIONS */}
+        <section
+          style={{
+            background: "#ffffff",
+            borderRadius: "14px",
+            padding: "22px",
+            border: "1px solid #e5e7eb",
+            overflowX: "auto",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "16px",
+            }}
+          >
+            <h2
+              style={{
+                margin: 0,
+                fontSize: "21px",
+              }}
+            >
+              Latest Transaction History
             </h2>
 
-            <span style={countBadge}>
-              {transactions.length}
+            <span
+              style={{
+                color: "#6b7280",
+                fontSize: "14px",
+              }}
+            >
+              {transactions.length} loaded
             </span>
           </div>
 
-          {transactions.length === 0 ? (
-            <p style={emptyStyle}>
+          {loading ? (
+            <p>Loading transactions...</p>
+          ) : transactions.length === 0 ? (
+            <p
+              style={{
+                color: "#6b7280",
+              }}
+            >
               No transactions found.
             </p>
           ) : (
-            <div style={tableWrapper}>
-              <table style={tableStyle}>
-                <thead>
-                  <tr>
-                    <th style={thStyle}>Date</th>
-                    <th style={thStyle}>Type</th>
-                    <th style={thStyle}>Amount</th>
-                    <th style={thStyle}>Status</th>
-                    <th style={thStyle}>Reference</th>
-                    <th style={thStyle}>Description</th>
-                  </tr>
-                </thead>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: "900px",
+              }}
+            >
+              <thead>
+                <tr>
+                  <th style={thStyle}>Date</th>
+                  <th style={thStyle}>Type</th>
+                  <th style={thStyle}>Amount</th>
+                  <th style={thStyle}>
+                    Balance Before
+                  </th>
+                  <th style={thStyle}>
+                    Balance After
+                  </th>
+                  <th style={thStyle}>
+                    Reference
+                  </th>
+                  <th style={thStyle}>
+                    Description
+                  </th>
+                </tr>
+              </thead>
 
-                <tbody>
-                  {transactions
-                    .slice(0, 30)
-                    .map((transaction) => (
-                      <tr key={transaction.id}>
-                        <td style={tdStyle}>
-                          {formatDate(
-                            transaction.created_at
-                          )}
-                        </td>
+              <tbody>
+                {transactions.map(
+                  (transaction, index) => (
+                    <tr
+                      key={
+                        transaction.id ??
+                        `${transaction.created_at}-${index}`
+                      }
+                    >
+                      <td style={tdStyle}>
+                        {formatDate(
+                          transaction.created_at
+                        )}
+                      </td>
 
-                        <td style={tdStyle}>
-                          {transaction.type}
-                        </td>
+                      <td style={tdStyle}>
+                        {getStatus(
+                          transaction.type
+                        )}
+                      </td>
 
-                        <td style={tdStyle}>
-                          {formatNGN(
-                            Number(transaction.amount || 0)
-                          )}
-                        </td>
+                      <td style={tdStyle}>
+                        {formatNGN(
+                          transaction.amount
+                        )}
+                      </td>
 
-                        <td style={tdStyle}>
-                          <StatusBadge
-                            status={
-                              transaction.status || "unknown"
-                            }
-                          />
-                        </td>
+                      <td style={tdStyle}>
+                        {formatNGN(
+                          transaction.balance_before
+                        )}
+                      </td>
 
-                        <td
-                          style={{
-                            ...tdStyle,
-                            maxWidth: 260,
-                            wordBreak: "break-word",
-                          }}
-                        >
-                          {transaction.reference || "�"}
-                        </td>
+                      <td style={tdStyle}>
+                        {formatNGN(
+                          transaction.balance_after
+                        )}
+                      </td>
 
-                        <td style={tdStyle}>
-                          {transaction.description || "�"}
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
+                      <td style={tdStyle}>
+                        {transaction.reference ||
+                          "-"}
+                      </td>
+
+                      <td style={tdStyle}>
+                        {transaction.description ||
+                          "-"}
+                      </td>
+                    </tr>
+                  )
+                )}
+              </tbody>
+            </table>
           )}
         </section>
       </div>
@@ -838,17 +1071,17 @@ function StatCard({
   return (
     <div
       style={{
-        background: "white",
-        borderRadius: 12,
-        padding: 20,
-        boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+        background: "#ffffff",
+        border: "1px solid #e5e7eb",
+        borderRadius: "14px",
+        padding: "18px",
       }}
     >
       <div
         style={{
           color: "#6b7280",
-          fontSize: 13,
-          marginBottom: 8,
+          fontSize: "14px",
+          marginBottom: "8px",
         }}
       >
         {title}
@@ -856,8 +1089,8 @@ function StatCard({
 
       <div
         style={{
-          fontSize: 22,
-          fontWeight: 700,
+          fontSize: "22px",
+          fontWeight: 800,
         }}
       >
         {value}
@@ -866,137 +1099,36 @@ function StatCard({
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const normalized = status.toLowerCase();
-
-  let background = "#e5e7eb";
-  let color = "#374151";
-
-  if (
-    normalized === "completed" ||
-    normalized === "success" ||
-    normalized === "successful" ||
-    normalized === "active"
-  ) {
-    background = "#dcfce7";
-    color = "#166534";
-  }
-
-  if (
-    normalized === "pending" ||
-    normalized === "processing"
-  ) {
-    background = "#fef3c7";
-    color = "#92400e";
-  }
-
-  if (
-    normalized === "failed" ||
-    normalized === "cancelled" ||
-    normalized === "canceled" ||
-    normalized === "refunded"
-  ) {
-    background = "#fee2e2";
-    color = "#991b1b";
-  }
-
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "5px 9px",
-        borderRadius: 999,
-        background,
-        color,
-        fontSize: 12,
-        fontWeight: 600,
-      }}
-    >
-      {status}
-    </span>
-  );
-}
-
-const cardStyle: React.CSSProperties = {
-  background: "white",
-  borderRadius: 12,
-  padding: 20,
-  marginBottom: 25,
-  boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
-};
-
-const sectionTitle: React.CSSProperties = {
-  margin: 0,
-  fontSize: 20,
-};
-
-const sectionHeaderStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  marginBottom: 15,
-};
-
-const countBadge: React.CSSProperties = {
-  background: "#e5e7eb",
-  color: "#374151",
-  borderRadius: 999,
-  padding: "4px 9px",
-  fontSize: 12,
-  fontWeight: 600,
-};
-
-const labelStyle: React.CSSProperties = {
-  display: "block",
-  fontSize: 13,
-  fontWeight: 600,
-  marginBottom: 6,
-};
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  boxSizing: "border-box",
-  padding: "11px 12px",
+const buttonStyle = {
+  padding: "10px 15px",
+  borderRadius: "8px",
   border: "1px solid #d1d5db",
-  borderRadius: 8,
-  fontSize: 14,
-  background: "white",
-};
-
-const navButton: React.CSSProperties = {
-  padding: "11px 16px",
-  border: "none",
-  borderRadius: 8,
-  background: "#1f2937",
-  color: "white",
+  background: "#ffffff",
+  color: "#111827",
+  fontWeight: 700,
   cursor: "pointer",
 };
 
-const tableWrapper: React.CSSProperties = {
-  overflowX: "auto",
+const inputStyle = {
+  padding: "12px",
+  borderRadius: "8px",
+  border: "1px solid #d1d5db",
+  background: "#ffffff",
+  color: "#111827",
+  fontSize: "14px",
 };
 
-const tableStyle: React.CSSProperties = {
-  width: "100%",
-  borderCollapse: "collapse",
-  minWidth: 850,
-};
-
-const thStyle: React.CSSProperties = {
-  textAlign: "left",
-  padding: 12,
+const thStyle = {
+  textAlign: "left" as const,
+  padding: "12px",
   borderBottom: "1px solid #e5e7eb",
-  fontSize: 13,
-  background: "#f9fafb",
+  fontSize: "13px",
+  whiteSpace: "nowrap" as const,
 };
 
-const tdStyle: React.CSSProperties = {
-  padding: 12,
+const tdStyle = {
+  padding: "12px",
   borderBottom: "1px solid #f1f5f9",
-  fontSize: 13,
-};
-
-const emptyStyle: React.CSSProperties = {
-  color: "#6b7280",
-  margin: 0,
+  fontSize: "14px",
+  whiteSpace: "nowrap" as const,
 };

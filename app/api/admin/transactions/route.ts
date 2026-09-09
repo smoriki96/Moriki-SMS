@@ -12,47 +12,81 @@ const SUPABASE_PUBLISHABLE_KEY =
 const SUPABASE_SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+function responseJson(
+  data: Record<string, unknown>,
+  status = 200
+) {
+  return NextResponse.json(data, {
+    status,
+    headers: {
+      "Cache-Control":
+        "no-store, no-cache, must-revalidate, proxy-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+    },
+  });
+}
+
 export async function GET(request: NextRequest) {
   try {
+    /*
+     * -------------------------------------------------------
+     * 1. CHECK SERVER CONFIGURATION
+     * -------------------------------------------------------
+     */
+
     if (
       !SUPABASE_URL ||
       !SUPABASE_PUBLISHABLE_KEY ||
       !SUPABASE_SERVICE_ROLE_KEY
     ) {
-      return NextResponse.json(
+      return responseJson(
         {
           success: false,
-          error: "Supabase server configuration is missing.",
+          error:
+            "Supabase server configuration is incomplete.",
         },
-        { status: 500 }
+        500
       );
     }
+
+    /*
+     * -------------------------------------------------------
+     * 2. GET ACCESS TOKEN
+     * -------------------------------------------------------
+     */
 
     const authorization =
       request.headers.get("authorization");
 
     if (!authorization?.startsWith("Bearer ")) {
-      return NextResponse.json(
+      return responseJson(
         {
           success: false,
           error: "Unauthorized.",
         },
-        { status: 401 }
+        401
       );
     }
 
     const accessToken =
-      authorization.replace("Bearer ", "").trim();
+      authorization.substring("Bearer ".length).trim();
 
     if (!accessToken) {
-      return NextResponse.json(
+      return responseJson(
         {
           success: false,
           error: "Unauthorized.",
         },
-        { status: 401 }
+        401
       );
     }
+
+    /*
+     * -------------------------------------------------------
+     * 3. VERIFY USER
+     * -------------------------------------------------------
+     */
 
     const authClient = createClient(
       SUPABASE_URL,
@@ -73,31 +107,46 @@ export async function GET(request: NextRequest) {
     const {
       data: { user },
       error: userError,
-    } = await authClient.auth.getUser(accessToken);
+    } =
+      await authClient.auth.getUser(accessToken);
 
     if (userError || !user) {
-      return NextResponse.json(
+      return responseJson(
         {
           success: false,
-          error: "Your login session is invalid or expired.",
+          error:
+            "Your login session is invalid or expired.",
         },
-        { status: 401 }
+        401
       );
     }
+
+    /*
+     * -------------------------------------------------------
+     * 4. ADMIN CHECK
+     * -------------------------------------------------------
+     */
 
     if (
       !user.email ||
       user.email.toLowerCase() !==
         ADMIN_EMAIL.toLowerCase()
     ) {
-      return NextResponse.json(
+      return responseJson(
         {
           success: false,
-          error: "Administrator access required.",
+          error:
+            "Administrator access required.",
         },
-        { status: 403 }
+        403
       );
     }
+
+    /*
+     * -------------------------------------------------------
+     * 5. SERVER-ONLY SERVICE ROLE CLIENT
+     * -------------------------------------------------------
+     */
 
     const adminClient = createClient(
       SUPABASE_URL,
@@ -110,18 +159,26 @@ export async function GET(request: NextRequest) {
       }
     );
 
+    /*
+     * -------------------------------------------------------
+     * 6. GET LATEST TRANSACTIONS
+     *
+     * We use "*" so this endpoint won't break simply
+     * because another transaction column exists.
+     * -------------------------------------------------------
+     */
+
     const {
       data: transactions,
       error: transactionsError,
-    } = await adminClient
-      .from("wallet_transactions")
-      .select(
-        "id,user_id,amount,type,status,reference,description,created_at"
-      )
-      .order("created_at", {
-        ascending: false,
-      })
-      .limit(200);
+    } =
+      await adminClient
+        .from("wallet_transactions")
+        .select("*")
+        .order("created_at", {
+          ascending: false,
+        })
+        .limit(500);
 
     if (transactionsError) {
       console.error(
@@ -129,39 +186,36 @@ export async function GET(request: NextRequest) {
         transactionsError
       );
 
-      return NextResponse.json(
+      return responseJson(
         {
           success: false,
           error:
             transactionsError.message ||
             "Unable to load transactions.",
         },
-        { status: 500 }
+        500
       );
     }
 
-    return NextResponse.json(
-      {
-        success: true,
-        transactions: transactions || [],
-      },
-      {
-        status: 200,
-        headers: {
-          "Cache-Control":
-            "no-store, no-cache, must-revalidate, proxy-revalidate",
-          Pragma: "no-cache",
-          Expires: "0",
-        },
-      }
-    );
+    /*
+     * -------------------------------------------------------
+     * 7. RETURN LATEST TRANSACTIONS
+     * -------------------------------------------------------
+     */
+
+    return responseJson({
+      success: true,
+      transactions: Array.isArray(transactions)
+        ? transactions
+        : [],
+    });
   } catch (error) {
     console.error(
       "ADMIN TRANSACTIONS SERVER ERROR:",
       error
     );
 
-    return NextResponse.json(
+    return responseJson(
       {
         success: false,
         error:
@@ -169,7 +223,7 @@ export async function GET(request: NextRequest) {
             ? error.message
             : "Unable to load admin transactions.",
       },
-      { status: 500 }
+      500
     );
   }
 }
