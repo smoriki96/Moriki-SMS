@@ -1,14 +1,7 @@
 "use client";
 
-import {
-  Suspense,
-  useEffect,
-  useState,
-} from "react";
-import {
-  useRouter,
-  useSearchParams,
-} from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 
 function ResetPasswordContent() {
@@ -17,17 +10,15 @@ function ResetPasswordContent() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] =
-    useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] =
     useState<"error" | "success">("error");
 
   const [loading, setLoading] = useState(false);
-  const [checking, setChecking] = useState(true);
-  const [recoveryMode, setRecoveryMode] =
-    useState(false);
+  const [checkingRecovery, setCheckingRecovery] = useState(true);
+  const [recoveryMode, setRecoveryMode] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -35,16 +26,17 @@ function ResetPasswordContent() {
     async function prepareRecovery() {
       try {
         /*
-         * Supabase may send the user back with a
-         * ?code=... parameter when PKCE is being used.
+         * Supabase PKCE password-reset links arrive like:
+         *
+         * /reset-password?code=xxxxxxxx
+         *
+         * Exchange that code for a real Supabase session.
          */
         const code = searchParams.get("code");
 
         if (code) {
-          const { error } =
-            await supabase.auth.exchangeCodeForSession(
-              code
-            );
+          const { data, error } =
+            await supabase.auth.exchangeCodeForSession(code);
 
           if (error) {
             console.error(
@@ -58,70 +50,53 @@ function ResetPasswordContent() {
                 "This password reset link is invalid or has expired. Please request a new one."
               );
               setMessageType("error");
-              setChecking(false);
+              setCheckingRecovery(false);
             }
 
             return;
           }
 
-          if (mounted) {
+          if (data.session && mounted) {
             setRecoveryMode(true);
+
+            const recoveredEmail =
+              data.session.user.email || "";
+
+            setEmail(recoveredEmail);
             setMessage("");
-            setChecking(false);
+          }
+
+          if (mounted) {
+            setCheckingRecovery(false);
           }
 
           return;
         }
 
         /*
-         * Listen for Supabase's PASSWORD_RECOVERY event.
-         * This is important when the recovery token comes
-         * through the URL hash.
+         * If there is no code, check whether a recovery
+         * session already exists.
          */
-        const {
-          data: { subscription },
-        } =
-          supabase.auth.onAuthStateChange(
-            async (event, session) => {
-              if (
-                event === "PASSWORD_RECOVERY" &&
-                session
-              ) {
-                if (mounted) {
-                  setRecoveryMode(true);
-                  setMessage("");
-                  setChecking(false);
-                }
-              }
-            }
+        const { data, error } =
+          await supabase.auth.getSession();
+
+        if (error) {
+          console.error(
+            "RECOVERY SESSION ERROR:",
+            error
           );
-
-        /*
-         * Give Supabase a moment to process a recovery
-         * URL before checking the current session.
-         */
-        await new Promise((resolve) =>
-          setTimeout(resolve, 700)
-        );
-
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        /*
-         * Do NOT automatically treat an ordinary logged-in
-         * session as password recovery.
-         *
-         * A normal session should show the email form.
-         */
-        if (mounted && !recoveryMode) {
-          setRecoveryMode(false);
-          setChecking(false);
         }
 
-        return () => {
-          subscription.unsubscribe();
-        };
+        if (mounted) {
+          if (data.session) {
+            setRecoveryMode(true);
+            setEmail(data.session.user.email || "");
+          } else {
+            setRecoveryMode(false);
+          }
+
+          setCheckingRecovery(false);
+        }
       } catch (error) {
         console.error(
           "PASSWORD RECOVERY ERROR:",
@@ -130,33 +105,21 @@ function ResetPasswordContent() {
 
         if (mounted) {
           setRecoveryMode(false);
-          setChecking(false);
           setMessage(
-            "Unable to process the password reset link. Please request a new one."
+            "Unable to open the password reset link. Please request a new one."
           );
           setMessageType("error");
+          setCheckingRecovery(false);
         }
       }
     }
 
-    let cleanup:
-      | (() => void)
-      | undefined;
-
-    prepareRecovery().then((result) => {
-      if (typeof result === "function") {
-        cleanup = result;
-      }
-    });
+    prepareRecovery();
 
     return () => {
       mounted = false;
-
-      if (cleanup) {
-        cleanup();
-      }
     };
-  }, [searchParams, recoveryMode]);
+  }, [searchParams]);
 
   async function handleSendResetLink(
     e: React.FormEvent<HTMLFormElement>
@@ -176,21 +139,8 @@ function ResetPasswordContent() {
     setLoading(true);
 
     try {
-      /*
-       * On Vercel this will use the production URL.
-       * On localhost it will use localhost.
-       */
-      const siteUrl =
-        process.env.NEXT_PUBLIC_SITE_URL ||
-        window.location.origin;
-
       const redirectTo =
-        `${siteUrl.replace(/\/$/, "")}/reset-password`;
-
-      console.log(
-        "PASSWORD RESET REDIRECT:",
-        redirectTo
-      );
+        `${window.location.origin}/reset-password`;
 
       const { error } =
         await supabase.auth.resetPasswordForEmail(
@@ -202,7 +152,7 @@ function ResetPasswordContent() {
 
       if (error) {
         console.error(
-          "SEND RESET ERROR:",
+          "SEND RESET LINK ERROR:",
           error
         );
 
@@ -217,14 +167,14 @@ function ResetPasswordContent() {
       setMessageType("success");
     } catch (error) {
       console.error(
-        "SEND RESET ERROR:",
+        "SEND RESET LINK ERROR:",
         error
       );
 
       setMessage(
         error instanceof Error
           ? error.message
-          : "Something went wrong while sending the reset link."
+          : "Unable to send the reset link."
       );
 
       setMessageType("error");
@@ -268,6 +218,21 @@ function ResetPasswordContent() {
     setLoading(true);
 
     try {
+      /*
+       * At this point the PKCE code has already been
+       * exchanged for a Supabase recovery session.
+       */
+      const { data: sessionData } =
+        await supabase.auth.getSession();
+
+      if (!sessionData.session) {
+        setMessage(
+          "Your password reset session is no longer valid. Please request a new reset link."
+        );
+        setMessageType("error");
+        return;
+      }
+
       const { error } =
         await supabase.auth.updateUser({
           password,
@@ -303,7 +268,7 @@ function ResetPasswordContent() {
       setMessage(
         error instanceof Error
           ? error.message
-          : "Something went wrong while updating your password."
+          : "Unable to update your password."
       );
 
       setMessageType("error");
@@ -312,14 +277,14 @@ function ResetPasswordContent() {
     }
   }
 
-  if (checking) {
+  if (checkingRecovery) {
     return (
       <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-6">
         <div className="text-center">
           <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-700 border-t-white" />
 
           <p className="text-slate-400">
-            Checking password reset...
+            Checking password reset link...
           </p>
         </div>
       </main>
@@ -404,6 +369,15 @@ function ResetPasswordContent() {
               onSubmit={handleUpdatePassword}
               className="space-y-5"
             >
+              {email && (
+                <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-400">
+                  Resetting password for:
+                  <div className="mt-1 font-medium text-white">
+                    {email}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label
                   htmlFor="password"
@@ -480,6 +454,7 @@ export default function ResetPasswordPage() {
         <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-6">
           <div className="text-center">
             <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-700 border-t-white" />
+
             <p className="text-slate-400">
               Loading...
             </p>
