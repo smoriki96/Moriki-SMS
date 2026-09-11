@@ -23,12 +23,59 @@ export default function ResetPasswordPage() {
     let mounted = true;
 
     async function checkRecoverySession() {
-      const { data } = await supabase.auth.getSession();
+      try {
+        const { data, error } =
+          await supabase.auth.getSession();
 
-      if (!mounted) return;
+        if (!mounted) return;
 
-      setRecoveryMode(Boolean(data.session));
-      setCheckingSession(false);
+        if (error) {
+          console.error(
+            "RESET SESSION ERROR:",
+            error
+          );
+          setRecoveryMode(false);
+          setCheckingSession(false);
+          return;
+        }
+
+        /*
+         * A normal logged-in session must NOT automatically
+         * put the user into password-recovery mode.
+         *
+         * PASSWORD_RECOVERY is detected through the
+         * auth state change below.
+         */
+        if (data.session) {
+          const hash =
+            typeof window !== "undefined"
+              ? window.location.hash
+              : "";
+
+          if (
+            hash.includes("access_token=") ||
+            hash.includes("type=recovery")
+          ) {
+            setRecoveryMode(true);
+          } else {
+            setRecoveryMode(false);
+          }
+        } else {
+          setRecoveryMode(false);
+        }
+
+        setCheckingSession(false);
+      } catch (error) {
+        console.error(
+          "RESET SESSION CHECK ERROR:",
+          error
+        );
+
+        if (mounted) {
+          setRecoveryMode(false);
+          setCheckingSession(false);
+        }
+      }
     }
 
     checkRecoverySession();
@@ -36,13 +83,42 @@ export default function ResetPasswordPage() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      async (event, session) => {
         if (!mounted) return;
 
-        if (event === "PASSWORD_RECOVERY" && session) {
+        console.log(
+          "PASSWORD RESET AUTH EVENT:",
+          event
+        );
+
+        if (
+          event === "PASSWORD_RECOVERY" &&
+          session
+        ) {
           setRecoveryMode(true);
           setCheckingSession(false);
+          setMessage("");
+          return;
         }
+
+        /*
+         * Do not treat ordinary SIGNED_IN as recovery.
+         */
+        if (event === "SIGNED_IN") {
+          const hash =
+            typeof window !== "undefined"
+              ? window.location.hash
+              : "";
+
+          if (
+            hash.includes("access_token=") ||
+            hash.includes("type=recovery")
+          ) {
+            setRecoveryMode(true);
+          }
+        }
+
+        setCheckingSession(false);
       }
     );
 
@@ -70,11 +146,30 @@ export default function ResetPasswordPage() {
     setLoading(true);
 
     try {
-      const siteUrl =
-        process.env.NEXT_PUBLIC_SITE_URL ||
+      /*
+       * Production:
+       * NEXT_PUBLIC_SITE_URL should be:
+       * https://moriki-nimid2edi-smoriki96.vercel.app
+       *
+       * Localhost:
+       * Falls back to the current local origin.
+       */
+      const configuredSiteUrl =
+        process.env.NEXT_PUBLIC_SITE_URL?.trim();
+
+      let baseUrl =
+        configuredSiteUrl ||
         window.location.origin;
 
-      const redirectTo = `${siteUrl}/reset-password`;
+      baseUrl = baseUrl.replace(/\/+$/, "");
+
+      const redirectTo =
+        `${baseUrl}/reset-password`;
+
+      console.log(
+        "PASSWORD RESET REDIRECT:",
+        redirectTo
+      );
 
       const { error } =
         await supabase.auth.resetPasswordForEmail(
@@ -85,6 +180,11 @@ export default function ResetPasswordPage() {
         );
 
       if (error) {
+        console.error(
+          "PASSWORD RESET REQUEST ERROR:",
+          error
+        );
+
         setMessage(error.message);
         setMessageType("error");
         return;
@@ -95,13 +195,17 @@ export default function ResetPasswordPage() {
       );
       setMessageType("success");
     } catch (error) {
-      console.error("RESET EMAIL ERROR:", error);
+      console.error(
+        "PASSWORD RESET REQUEST ERROR:",
+        error
+      );
 
       setMessage(
         error instanceof Error
           ? error.message
-          : "Something went wrong. Please try again."
+          : "Unable to send password reset email."
       );
+
       setMessageType("error");
     } finally {
       setLoading(false);
@@ -122,12 +226,16 @@ export default function ResetPasswordPage() {
     }
 
     if (password.length < 6) {
-      setMessage("Password must be at least 6 characters.");
+      setMessage(
+        "Password must be at least 6 characters."
+      );
       return;
     }
 
     if (!confirmPassword) {
-      setMessage("Please confirm your new password.");
+      setMessage(
+        "Please confirm your new password."
+      );
       return;
     }
 
@@ -145,6 +253,11 @@ export default function ResetPasswordPage() {
         });
 
       if (error) {
+        console.error(
+          "PASSWORD UPDATE ERROR:",
+          error
+        );
+
         setMessage(error.message);
         setMessageType("error");
         return;
@@ -161,13 +274,17 @@ export default function ResetPasswordPage() {
         router.replace("/login");
       }, 1500);
     } catch (error) {
-      console.error("PASSWORD UPDATE ERROR:", error);
+      console.error(
+        "PASSWORD UPDATE ERROR:",
+        error
+      );
 
       setMessage(
         error instanceof Error
           ? error.message
-          : "Something went wrong while updating your password."
+          : "Unable to update password."
       );
+
       setMessageType("error");
     } finally {
       setLoading(false);
