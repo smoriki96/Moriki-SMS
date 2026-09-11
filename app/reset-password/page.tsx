@@ -1,124 +1,99 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import {
+  Suspense,
+  useEffect,
+  useState,
+} from "react";
+import {
+  useRouter,
+  useSearchParams,
+} from "next/navigation";
 import { supabase } from "../../lib/supabase";
 
-export default function ResetPasswordPage() {
+function ResetPasswordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] =
+    useState("");
 
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] =
     useState<"error" | "success">("error");
 
   const [loading, setLoading] = useState(false);
-  const [checkingSession, setCheckingSession] = useState(true);
-  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [checkingSession, setCheckingSession] =
+    useState(true);
+  const [recoveryMode, setRecoveryMode] =
+    useState(false);
 
   useEffect(() => {
     let mounted = true;
 
-    async function prepareReset() {
-      try {
-        /*
-         * Supabase production password-reset links
-         * can contain a ?code= parameter.
-         *
-         * Exchange that code for a session first.
-         */
-        const code = searchParams.get("code");
+    async function checkRecoverySession() {
+      /*
+       * Supabase recovery links can arrive with
+       * recovery information in the URL.
+       *
+       * We listen for PASSWORD_RECOVERY instead
+       * of treating every normal login session as
+       * a password-recovery session.
+       */
 
-        if (code) {
-          const { error } =
-            await supabase.auth.exchangeCodeForSession(
-              code
-            );
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-          if (error) {
-            console.error(
-              "PASSWORD RESET CODE ERROR:",
-              error
-            );
+      if (!mounted) return;
 
-            if (mounted) {
-              setMessage(
-                "This password reset link is invalid or has expired. Please request a new one."
-              );
-              setMessageType("error");
-              setRecoveryMode(false);
-            }
+      /*
+       * Only enter recovery mode if Supabase
+       * actually tells us this is a recovery flow.
+       */
+      if (session) {
+        const hash =
+          window.location.hash || "";
 
-            return;
-          }
+        const hasRecoveryToken =
+          hash.includes("access_token=") ||
+          hash.includes("type=recovery");
 
-          if (mounted) {
-            setRecoveryMode(true);
-            setMessage("");
-          }
+        const type =
+          searchParams.get("type");
 
-          return;
-        }
-
-        /*
-         * Check whether Supabase already has a
-         * recovery session.
-         */
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!mounted) return;
-
-        if (session) {
+        if (
+          hasRecoveryToken ||
+          type === "recovery"
+        ) {
           setRecoveryMode(true);
-        } else {
-          setRecoveryMode(false);
-        }
-      } catch (error) {
-        console.error(
-          "PASSWORD RESET PREPARATION ERROR:",
-          error
-        );
-
-        if (mounted) {
-          setMessage(
-            "Unable to open the password reset page. Please request a new reset link."
-          );
-          setMessageType("error");
-          setRecoveryMode(false);
-        }
-      } finally {
-        if (mounted) {
-          setCheckingSession(false);
         }
       }
+
+      setCheckingSession(false);
     }
 
-    prepareReset();
+    checkRecoverySession();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (!mounted) return;
+    } =
+      supabase.auth.onAuthStateChange(
+        (event, session) => {
+          if (!mounted) return;
 
-        if (
-          event === "PASSWORD_RECOVERY" ||
-          event === "SIGNED_IN"
-        ) {
-          if (session) {
+          if (
+            event ===
+              "PASSWORD_RECOVERY" &&
+            session
+          ) {
             setRecoveryMode(true);
-            setMessage("");
-            setMessageType("success");
+            setCheckingSession(false);
           }
         }
-      }
-    );
+      );
 
     return () => {
       mounted = false;
@@ -137,28 +112,21 @@ export default function ResetPasswordPage() {
     const cleanEmail = email.trim();
 
     if (!cleanEmail) {
-      setMessage("Please enter your email address.");
+      setMessage(
+        "Please enter your email address."
+      );
       return;
     }
 
     setLoading(true);
 
     try {
-      /*
-       * Always use the production site URL when
-       * NEXT_PUBLIC_SITE_URL exists.
-       */
       const siteUrl =
         process.env.NEXT_PUBLIC_SITE_URL ||
         window.location.origin;
 
       const redirectTo =
         `${siteUrl}/reset-password`;
-
-      console.log(
-        "PASSWORD RESET REDIRECT:",
-        redirectTo
-      );
 
       const { error } =
         await supabase.auth.resetPasswordForEmail(
@@ -169,11 +137,6 @@ export default function ResetPasswordPage() {
         );
 
       if (error) {
-        console.error(
-          "PASSWORD RESET EMAIL ERROR:",
-          error
-        );
-
         setMessage(error.message);
         setMessageType("error");
         return;
@@ -182,17 +145,18 @@ export default function ResetPasswordPage() {
       setMessage(
         "Password reset link sent. Please check your email and tap the reset link."
       );
+
       setMessageType("success");
     } catch (error) {
       console.error(
-        "PASSWORD RESET EMAIL ERROR:",
+        "PASSWORD RESET REQUEST ERROR:",
         error
       );
 
       setMessage(
         error instanceof Error
           ? error.message
-          : "Something went wrong while sending the reset link."
+          : "Something went wrong. Please try again."
       );
 
       setMessageType("error");
@@ -210,7 +174,9 @@ export default function ResetPasswordPage() {
     setMessageType("error");
 
     if (!password) {
-      setMessage("Please enter a new password.");
+      setMessage(
+        "Please enter a new password."
+      );
       return;
     }
 
@@ -229,22 +195,27 @@ export default function ResetPasswordPage() {
     }
 
     if (password !== confirmPassword) {
-      setMessage("Passwords do not match.");
+      setMessage(
+        "Passwords do not match."
+      );
       return;
     }
 
     setLoading(true);
 
     try {
+      /*
+       * Make sure Supabase has a valid recovery
+       * session before changing the password.
+       */
       const {
         data: { session },
       } = await supabase.auth.getSession();
 
       if (!session) {
         setMessage(
-          "Your password reset session is missing or has expired. Please request a new reset link."
+          "This password reset link is invalid or has expired. Please request a new one."
         );
-        setMessageType("error");
         return;
       }
 
@@ -254,11 +225,6 @@ export default function ResetPasswordPage() {
         });
 
       if (error) {
-        console.error(
-          "PASSWORD UPDATE ERROR:",
-          error
-        );
-
         setMessage(error.message);
         setMessageType("error");
         return;
@@ -267,6 +233,7 @@ export default function ResetPasswordPage() {
       setMessage(
         "Password updated successfully. Redirecting to login..."
       );
+
       setMessageType("success");
 
       await supabase.auth.signOut();
@@ -299,7 +266,7 @@ export default function ResetPasswordPage() {
           <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-700 border-t-white" />
 
           <p className="text-slate-400">
-            Loading password reset...
+            Loading...
           </p>
         </div>
       </main>
@@ -419,7 +386,9 @@ export default function ResetPasswordPage() {
                   type="password"
                   value={confirmPassword}
                   onChange={(e) =>
-                    setConfirmPassword(e.target.value)
+                    setConfirmPassword(
+                      e.target.value
+                    )
                   }
                   placeholder="Confirm new password"
                   autoComplete="new-password"
@@ -442,7 +411,9 @@ export default function ResetPasswordPage() {
 
           <button
             type="button"
-            onClick={() => router.push("/login")}
+            onClick={() =>
+              router.push("/login")
+            }
             className="mt-5 w-full text-sm text-slate-400 transition hover:text-white"
           >
             ← Back to login
@@ -450,5 +421,27 @@ export default function ResetPasswordPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+function LoadingResetPage() {
+  return (
+    <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-6">
+      <div className="text-center">
+        <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-700 border-t-white" />
+
+        <p className="text-slate-400">
+          Loading...
+        </p>
+      </div>
+    </main>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<LoadingResetPage />}>
+      <ResetPasswordContent />
+    </Suspense>
   );
 }
