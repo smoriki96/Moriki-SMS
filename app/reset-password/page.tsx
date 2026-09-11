@@ -1,8 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
-import { supabase } from "../../lib/supabase";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+  {
+    auth: {
+      flowType: "implicit",
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: true,
+    },
+  }
+);
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -26,63 +39,10 @@ export default function ResetPasswordPage() {
     async function initializeRecovery() {
       try {
         /*
-         * IMPORTANT:
-         * Supabase can send the recovery code as:
+         * With implicit recovery, Supabase places the
+         * recovery session in the URL hash.
          *
-         * /reset-password?code=...
-         *
-         * We must exchange that code for a session.
-         */
-
-        const params = new URLSearchParams(
-          window.location.search
-        );
-
-        const code = params.get("code");
-
-        if (code) {
-          const { error } =
-            await supabase.auth.exchangeCodeForSession(
-              code
-            );
-
-          if (error) {
-            console.error(
-              "PASSWORD RECOVERY CODE ERROR:",
-              error
-            );
-
-            if (mounted) {
-              setRecoveryMode(false);
-              setMessage(
-                "This password reset link is invalid or has expired. Please request a new one."
-              );
-              setMessageType("error");
-            }
-
-            return;
-          }
-
-          if (mounted) {
-            setRecoveryMode(true);
-            setMessage("");
-          }
-
-          /*
-           * Remove the code from the browser URL.
-           */
-          window.history.replaceState(
-            {},
-            document.title,
-            "/reset-password"
-          );
-
-          return;
-        }
-
-        /*
-         * Check whether Supabase already has
-         * a recovery session.
+         * Supabase's browser client detects it automatically.
          */
         const { data, error } =
           await supabase.auth.getSession();
@@ -94,10 +54,13 @@ export default function ResetPasswordPage() {
           );
         }
 
-        if (mounted) {
-          setRecoveryMode(
-            Boolean(data.session)
-          );
+        if (!mounted) return;
+
+        if (data.session) {
+          setRecoveryMode(true);
+          setMessage("");
+        } else {
+          setRecoveryMode(false);
         }
       } catch (error) {
         console.error(
@@ -123,19 +86,18 @@ export default function ResetPasswordPage() {
 
     const {
       data: { subscription },
-    } =
-      supabase.auth.onAuthStateChange(
-        (event, session) => {
-          if (
-            event === "PASSWORD_RECOVERY" &&
-            session
-          ) {
-            setRecoveryMode(true);
-            setMessage("");
-            setChecking(false);
-          }
+    } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (
+          event === "PASSWORD_RECOVERY" &&
+          session
+        ) {
+          setRecoveryMode(true);
+          setMessage("");
+          setChecking(false);
         }
-      );
+      }
+    );
 
     return () => {
       mounted = false;
@@ -163,21 +125,12 @@ export default function ResetPasswordPage() {
     setLoading(true);
 
     try {
-      /*
-       * ALWAYS send production users to the
-       * reset-password route.
-       */
       const siteUrl =
         process.env.NEXT_PUBLIC_SITE_URL ||
         window.location.origin;
 
       const redirectTo =
         `${siteUrl.replace(/\/$/, "")}/reset-password`;
-
-      console.log(
-        "PASSWORD RESET REDIRECT:",
-        redirectTo
-      );
 
       const { error } =
         await supabase.auth.resetPasswordForEmail(
@@ -199,7 +152,7 @@ export default function ResetPasswordPage() {
       }
 
       setMessage(
-        "Password reset link sent. Please check your email and tap the new reset link."
+        "Password reset link sent. Please check your email and open the new reset link."
       );
       setMessageType("success");
     } catch (error) {
@@ -259,6 +212,18 @@ export default function ResetPasswordPage() {
     setLoading(true);
 
     try {
+      const {
+        data: sessionData,
+      } = await supabase.auth.getSession();
+
+      if (!sessionData.session) {
+        setMessage(
+          "Your password reset session is no longer valid. Please request a new reset link."
+        );
+        setMessageType("error");
+        return;
+      }
+
       const { error } =
         await supabase.auth.updateUser({
           password,
