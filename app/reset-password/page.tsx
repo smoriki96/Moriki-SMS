@@ -16,73 +16,39 @@ export default function ResetPasswordPage() {
     useState<"error" | "success">("error");
 
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [recoveryMode, setRecoveryMode] = useState(false);
-  const [checkingRecovery, setCheckingRecovery] = useState(true);
 
   useEffect(() => {
     let mounted = true;
 
-    async function setupRecovery() {
-      try {
-        // Check the current URL for a Supabase recovery flow.
-        const hash = window.location.hash;
+    async function checkRecoverySession() {
+      const { data } = await supabase.auth.getSession();
 
-        const isRecoveryHash =
-          hash.includes("type=recovery") ||
-          hash.includes("access_token=");
+      if (!mounted) return;
 
-        if (isRecoveryHash) {
-          setRecoveryMode(true);
-          setCheckingRecovery(false);
-          return;
-        }
-
-        // Listen for Supabase's PASSWORD_RECOVERY event.
-        const {
-          data: { subscription },
-        } = supabase.auth.onAuthStateChange(
-          (event, session) => {
-            if (!mounted) return;
-
-            if (
-              event === "PASSWORD_RECOVERY" &&
-              session
-            ) {
-              setRecoveryMode(true);
-            }
-          }
-        );
-
-        setCheckingRecovery(false);
-
-        return () => {
-          subscription.unsubscribe();
-        };
-      } catch (error) {
-        console.error(
-          "RECOVERY CHECK ERROR:",
-          error
-        );
-
-        if (mounted) {
-          setCheckingRecovery(false);
-          setRecoveryMode(false);
-        }
-      }
+      setRecoveryMode(Boolean(data.session));
+      setCheckingSession(false);
     }
 
-    let cleanup: (() => void) | undefined;
+    checkRecoverySession();
 
-    setupRecovery().then((cleanupFunction) => {
-      cleanup = cleanupFunction;
-    });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (!mounted) return;
+
+        if (event === "PASSWORD_RECOVERY" && session) {
+          setRecoveryMode(true);
+          setCheckingSession(false);
+        }
+      }
+    );
 
     return () => {
       mounted = false;
-
-      if (cleanup) {
-        cleanup();
-      }
+      subscription.unsubscribe();
     };
   }, []);
 
@@ -104,8 +70,11 @@ export default function ResetPasswordPage() {
     setLoading(true);
 
     try {
-      const redirectTo =
-        `${window.location.origin}/reset-password`;
+      const siteUrl =
+        process.env.NEXT_PUBLIC_SITE_URL ||
+        window.location.origin;
+
+      const redirectTo = `${siteUrl}/reset-password`;
 
       const { error } =
         await supabase.auth.resetPasswordForEmail(
@@ -116,33 +85,23 @@ export default function ResetPasswordPage() {
         );
 
       if (error) {
-        console.error(
-          "PASSWORD RESET ERROR:",
-          error
-        );
-
         setMessage(error.message);
         setMessageType("error");
         return;
       }
 
       setMessage(
-        "Reset link sent successfully. Check your email and tap the password reset link."
+        "Password reset link sent. Please check your email and tap the reset link."
       );
-
       setMessageType("success");
     } catch (error) {
-      console.error(
-        "PASSWORD RESET ERROR:",
-        error
-      );
+      console.error("RESET EMAIL ERROR:", error);
 
       setMessage(
         error instanceof Error
           ? error.message
           : "Something went wrong. Please try again."
       );
-
       setMessageType("error");
     } finally {
       setLoading(false);
@@ -158,21 +117,17 @@ export default function ResetPasswordPage() {
     setMessageType("error");
 
     if (!password) {
-      setMessage("Please enter your new password.");
+      setMessage("Please enter a new password.");
       return;
     }
 
     if (password.length < 6) {
-      setMessage(
-        "Password must be at least 6 characters."
-      );
+      setMessage("Password must be at least 6 characters.");
       return;
     }
 
     if (!confirmPassword) {
-      setMessage(
-        "Please confirm your new password."
-      );
+      setMessage("Please confirm your new password.");
       return;
     }
 
@@ -190,11 +145,6 @@ export default function ResetPasswordPage() {
         });
 
       if (error) {
-        console.error(
-          "UPDATE PASSWORD ERROR:",
-          error
-        );
-
         setMessage(error.message);
         setMessageType("error");
         return;
@@ -203,7 +153,6 @@ export default function ResetPasswordPage() {
       setMessage(
         "Password updated successfully. Redirecting to login..."
       );
-
       setMessageType("success");
 
       await supabase.auth.signOut();
@@ -212,24 +161,20 @@ export default function ResetPasswordPage() {
         router.replace("/login");
       }, 1500);
     } catch (error) {
-      console.error(
-        "UPDATE PASSWORD ERROR:",
-        error
-      );
+      console.error("PASSWORD UPDATE ERROR:", error);
 
       setMessage(
         error instanceof Error
           ? error.message
-          : "Something went wrong. Please try again."
+          : "Something went wrong while updating your password."
       );
-
       setMessageType("error");
     } finally {
       setLoading(false);
     }
   }
 
-  if (checkingRecovery) {
+  if (checkingSession) {
     return (
       <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-6">
         <div className="text-center">
