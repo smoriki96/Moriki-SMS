@@ -1,29 +1,24 @@
-import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { NextResponse, type NextRequest } from "next/server";
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const code = url.searchParams.get("code");
-  const nextParam = url.searchParams.get("next");
+export async function GET(request: NextRequest) {
+  const requestUrl = new URL(request.url);
 
-  let next = "/reset-password";
+  const code = requestUrl.searchParams.get("code");
+  let next = requestUrl.searchParams.get("next") || "/reset-password";
 
-  if (
-    nextParam &&
-    nextParam.startsWith("/") &&
-    !nextParam.startsWith("//")
-  ) {
-    next = nextParam;
+  if (!next.startsWith("/")) {
+    next = "/reset-password";
   }
 
   if (!code) {
     return NextResponse.redirect(
-      new URL("/reset-password?error=missing_code", url.origin)
+      new URL("/reset-password?error=missing_code", request.url)
     );
   }
 
   let response = NextResponse.redirect(
-    new URL(next, url.origin)
+    new URL(next, request.url)
   );
 
   const supabase = createServerClient(
@@ -32,24 +27,20 @@ export async function GET(request: Request) {
     {
       cookies: {
         getAll() {
-          return request.headers.get("cookie")
-            ? request.headers
-                .get("cookie")!
-                .split(";")
-                .map((item) => {
-                  const index = item.indexOf("=");
-
-                  return {
-                    name: item.slice(0, index).trim(),
-                    value: decodeURIComponent(
-                      item.slice(index + 1).trim()
-                    ),
-                  };
-                })
-            : [];
+          return request.cookies.getAll();
         },
 
         setAll(cookiesToSet) {
+          cookiesToSet.forEach(
+            ({ name, value }) => {
+              request.cookies.set(name, value);
+            }
+          );
+
+          response = NextResponse.redirect(
+            new URL(next, request.url)
+          );
+
           cookiesToSet.forEach(
             ({ name, value, options }) => {
               response.cookies.set(
@@ -69,14 +60,14 @@ export async function GET(request: Request) {
 
   if (error) {
     console.error(
-      "AUTH CALLBACK ERROR:",
+      "PASSWORD RECOVERY CALLBACK ERROR:",
       error.message
     );
 
     return NextResponse.redirect(
       new URL(
         "/reset-password?error=invalid_or_expired",
-        url.origin
+        request.url
       )
     );
   }
