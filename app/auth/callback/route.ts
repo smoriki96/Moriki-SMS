@@ -56,17 +56,19 @@ export async function GET(request: NextRequest) {
   );
 
   const { error } =
-    await supabase.auth.exchangeCodeForSession(code);
+    await supabase.auth.exchangeCodeForSession(
+      code
+    );
 
   if (error) {
     console.error(
-      "PASSWORD RECOVERY CALLBACK ERROR:",
+      "AUTH CALLBACK ERROR:",
       error.message
     );
 
     return NextResponse.redirect(
       new URL(
-        "/reset-password?error=invalid_or_expired",
+        "/reset-password?error=invalid_code",
         request.url
       )
     );
