@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -22,103 +23,100 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     let mounted = true;
 
-    async function checkRecoverySession() {
+    async function prepareReset() {
       try {
-        const { data, error } =
-          await supabase.auth.getSession();
+        /*
+         * Supabase production password-reset links
+         * can contain a ?code= parameter.
+         *
+         * Exchange that code for a session first.
+         */
+        const code = searchParams.get("code");
 
-        if (!mounted) return;
+        if (code) {
+          const { error } =
+            await supabase.auth.exchangeCodeForSession(
+              code
+            );
 
-        if (error) {
-          console.error(
-            "RESET SESSION ERROR:",
-            error
-          );
-          setRecoveryMode(false);
-          setCheckingSession(false);
+          if (error) {
+            console.error(
+              "PASSWORD RESET CODE ERROR:",
+              error
+            );
+
+            if (mounted) {
+              setMessage(
+                "This password reset link is invalid or has expired. Please request a new one."
+              );
+              setMessageType("error");
+              setRecoveryMode(false);
+            }
+
+            return;
+          }
+
+          if (mounted) {
+            setRecoveryMode(true);
+            setMessage("");
+          }
+
           return;
         }
 
         /*
-         * A normal logged-in session must NOT automatically
-         * put the user into password-recovery mode.
-         *
-         * PASSWORD_RECOVERY is detected through the
-         * auth state change below.
+         * Check whether Supabase already has a
+         * recovery session.
          */
-        if (data.session) {
-          const hash =
-            typeof window !== "undefined"
-              ? window.location.hash
-              : "";
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-          if (
-            hash.includes("access_token=") ||
-            hash.includes("type=recovery")
-          ) {
-            setRecoveryMode(true);
-          } else {
-            setRecoveryMode(false);
-          }
+        if (!mounted) return;
+
+        if (session) {
+          setRecoveryMode(true);
         } else {
           setRecoveryMode(false);
         }
-
-        setCheckingSession(false);
       } catch (error) {
         console.error(
-          "RESET SESSION CHECK ERROR:",
+          "PASSWORD RESET PREPARATION ERROR:",
           error
         );
 
         if (mounted) {
+          setMessage(
+            "Unable to open the password reset page. Please request a new reset link."
+          );
+          setMessageType("error");
           setRecoveryMode(false);
+        }
+      } finally {
+        if (mounted) {
           setCheckingSession(false);
         }
       }
     }
 
-    checkRecoverySession();
+    prepareReset();
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         if (!mounted) return;
 
-        console.log(
-          "PASSWORD RESET AUTH EVENT:",
-          event
-        );
-
         if (
-          event === "PASSWORD_RECOVERY" &&
-          session
+          event === "PASSWORD_RECOVERY" ||
+          event === "SIGNED_IN"
         ) {
-          setRecoveryMode(true);
-          setCheckingSession(false);
-          setMessage("");
-          return;
-        }
-
-        /*
-         * Do not treat ordinary SIGNED_IN as recovery.
-         */
-        if (event === "SIGNED_IN") {
-          const hash =
-            typeof window !== "undefined"
-              ? window.location.hash
-              : "";
-
-          if (
-            hash.includes("access_token=") ||
-            hash.includes("type=recovery")
-          ) {
+          if (session) {
             setRecoveryMode(true);
+            setMessage("");
+            setMessageType("success");
           }
         }
-
-        setCheckingSession(false);
       }
     );
 
@@ -126,7 +124,7 @@ export default function ResetPasswordPage() {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [searchParams]);
 
   async function handleSendResetLink(
     e: React.FormEvent<HTMLFormElement>
@@ -147,24 +145,15 @@ export default function ResetPasswordPage() {
 
     try {
       /*
-       * Production:
-       * NEXT_PUBLIC_SITE_URL should be:
-       * https://moriki-nimid2edi-smoriki96.vercel.app
-       *
-       * Localhost:
-       * Falls back to the current local origin.
+       * Always use the production site URL when
+       * NEXT_PUBLIC_SITE_URL exists.
        */
-      const configuredSiteUrl =
-        process.env.NEXT_PUBLIC_SITE_URL?.trim();
-
-      let baseUrl =
-        configuredSiteUrl ||
+      const siteUrl =
+        process.env.NEXT_PUBLIC_SITE_URL ||
         window.location.origin;
 
-      baseUrl = baseUrl.replace(/\/+$/, "");
-
       const redirectTo =
-        `${baseUrl}/reset-password`;
+        `${siteUrl}/reset-password`;
 
       console.log(
         "PASSWORD RESET REDIRECT:",
@@ -181,7 +170,7 @@ export default function ResetPasswordPage() {
 
       if (error) {
         console.error(
-          "PASSWORD RESET REQUEST ERROR:",
+          "PASSWORD RESET EMAIL ERROR:",
           error
         );
 
@@ -196,14 +185,14 @@ export default function ResetPasswordPage() {
       setMessageType("success");
     } catch (error) {
       console.error(
-        "PASSWORD RESET REQUEST ERROR:",
+        "PASSWORD RESET EMAIL ERROR:",
         error
       );
 
       setMessage(
         error instanceof Error
           ? error.message
-          : "Unable to send password reset email."
+          : "Something went wrong while sending the reset link."
       );
 
       setMessageType("error");
@@ -247,6 +236,18 @@ export default function ResetPasswordPage() {
     setLoading(true);
 
     try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        setMessage(
+          "Your password reset session is missing or has expired. Please request a new reset link."
+        );
+        setMessageType("error");
+        return;
+      }
+
       const { error } =
         await supabase.auth.updateUser({
           password,
@@ -282,7 +283,7 @@ export default function ResetPasswordPage() {
       setMessage(
         error instanceof Error
           ? error.message
-          : "Unable to update password."
+          : "Something went wrong while updating your password."
       );
 
       setMessageType("error");
@@ -298,7 +299,7 @@ export default function ResetPasswordPage() {
           <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-700 border-t-white" />
 
           <p className="text-slate-400">
-            Loading...
+            Loading password reset...
           </p>
         </div>
       </main>
