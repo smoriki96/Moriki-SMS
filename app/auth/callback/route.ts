@@ -1,13 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-export async function GET(request: NextRequest) {
-  const requestUrl = new URL(request.url);
+export const dynamic = "force-dynamic";
 
-  const code = requestUrl.searchParams.get("code");
+export async function GET(request: NextRequest) {
+  const url = new URL(request.url);
+
+  const code = url.searchParams.get("code");
   const nextParam =
-    requestUrl.searchParams.get("next") ||
-    "/reset-password";
+    url.searchParams.get("next") || "/reset-password";
 
   const next =
     nextParam.startsWith("/") &&
@@ -15,18 +16,7 @@ export async function GET(request: NextRequest) {
       ? nextParam
       : "/reset-password";
 
-  if (!code) {
-    return NextResponse.redirect(
-      new URL(
-        "/reset-password?error=missing_code",
-        requestUrl.origin
-      )
-    );
-  }
-
-  let response = NextResponse.redirect(
-    new URL(next, requestUrl.origin)
-  );
+  let response = NextResponse.next();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -47,6 +37,10 @@ export async function GET(request: NextRequest) {
             }
           );
 
+          response = NextResponse.next({
+            request,
+          });
+
           cookiesToSet.forEach(
             ({
               name,
@@ -65,6 +59,15 @@ export async function GET(request: NextRequest) {
     }
   );
 
+  if (!code) {
+    return NextResponse.redirect(
+      new URL(
+        "/login?error=missing_reset_code",
+        request.url
+      )
+    );
+  }
+
   const { error } =
     await supabase.auth.exchangeCodeForSession(
       code
@@ -78,11 +81,28 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.redirect(
       new URL(
-        "/reset-password?error=invalid_or_expired",
-        requestUrl.origin
+        "/login?error=reset_link_invalid",
+        request.url
       )
     );
   }
 
-  return response;
+  const redirectResponse =
+    NextResponse.redirect(
+      new URL(
+        next,
+        request.url
+      )
+    );
+
+  response.cookies
+    .getAll()
+    .forEach((cookie) => {
+      redirectResponse.cookies.set(
+        cookie.name,
+        cookie.value
+      );
+    });
+
+  return redirectResponse;
 }
