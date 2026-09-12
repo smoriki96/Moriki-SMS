@@ -1,24 +1,30 @@
 import { createServerClient } from "@supabase/ssr";
-import { NextResponse, type NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
 
   const code = requestUrl.searchParams.get("code");
-  let next = requestUrl.searchParams.get("next") || "/reset-password";
+  const next = requestUrl.searchParams.get("next");
 
-  if (!next.startsWith("/")) {
-    next = "/reset-password";
-  }
+  const safeNext =
+    next &&
+    next.startsWith("/") &&
+    !next.startsWith("//")
+      ? next
+      : "/reset-password";
 
   if (!code) {
     return NextResponse.redirect(
-      new URL("/reset-password?error=missing_code", request.url)
+      new URL(
+        "/reset-password?error=missing_code",
+        request.url
+      )
     );
   }
 
   let response = NextResponse.redirect(
-    new URL(next, request.url)
+    new URL(safeNext, request.url)
   );
 
   const supabase = createServerClient(
@@ -33,16 +39,23 @@ export async function GET(request: NextRequest) {
         setAll(cookiesToSet) {
           cookiesToSet.forEach(
             ({ name, value }) => {
-              request.cookies.set(name, value);
+              request.cookies.set(
+                name,
+                value
+              );
             }
           );
 
           response = NextResponse.redirect(
-            new URL(next, request.url)
+            new URL(safeNext, request.url)
           );
 
           cookiesToSet.forEach(
-            ({ name, value, options }) => {
+            ({
+              name,
+              value,
+              options,
+            }) => {
               response.cookies.set(
                 name,
                 value,
@@ -68,7 +81,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.redirect(
       new URL(
-        "/reset-password?error=invalid_code",
+        "/reset-password?error=recovery_failed",
         request.url
       )
     );
