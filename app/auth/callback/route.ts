@@ -1,35 +1,27 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
-
   const code = requestUrl.searchParams.get("code");
-  const requestedNext =
-    requestUrl.searchParams.get("next") ||
-    "/reset-password";
-
   const next =
-    requestedNext.startsWith("/") &&
-    !requestedNext.startsWith("//")
-      ? requestedNext
-      : "/reset-password";
+    requestUrl.searchParams.get("next") || "/reset-password";
 
   if (!code) {
     return NextResponse.redirect(
       new URL(
-        "/login?error=password_reset_invalid",
-        requestUrl.origin
+        "/login?error=password-reset-link-invalid",
+        request.url
       )
     );
   }
 
   const cookieStore = await cookies();
 
-  let response = NextResponse.redirect(
-    new URL(next, requestUrl.origin)
-  );
+  let response = NextResponse.next({
+    request,
+  });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -41,17 +33,21 @@ export async function GET(request: Request) {
         },
 
         setAll(cookiesToSet) {
-          for (const {
-            name,
-            value,
-            options,
-          } of cookiesToSet) {
-            response.cookies.set(
-              name,
-              value,
-              options
-            );
-          }
+          cookiesToSet.forEach(
+            ({ name, value, options }) => {
+              cookieStore.set(
+                name,
+                value,
+                options
+              );
+
+              response.cookies.set(
+                name,
+                value,
+                options
+              );
+            }
+          );
         },
       },
     }
@@ -70,11 +66,34 @@ export async function GET(request: Request) {
 
     return NextResponse.redirect(
       new URL(
-        "/reset-password?error=invalid",
-        requestUrl.origin
+        "/login?error=password-reset-link-invalid",
+        request.url
       )
     );
   }
 
-  return response;
+  const safeNext =
+    next.startsWith("/") &&
+    !next.startsWith("//")
+      ? next
+      : "/reset-password";
+
+  const redirectResponse =
+    NextResponse.redirect(
+      new URL(
+        safeNext,
+        request.url
+      )
+    );
+
+  response.cookies
+    .getAll()
+    .forEach((cookie) => {
+      redirectResponse.cookies.set(
+        cookie.name,
+        cookie.value
+      );
+    });
+
+  return redirectResponse;
 }
