@@ -1,5 +1,6 @@
-import { createClient, type EmailOtpType } from "@supabase/supabase-js";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import type { EmailOtpType } from "@supabase/supabase-js";
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
@@ -10,28 +11,84 @@ export async function GET(request: NextRequest) {
   const type =
     requestUrl.searchParams.get("type") as EmailOtpType | null;
 
-  const next =
-    requestUrl.searchParams.get("next") ||
-    "/reset-password";
+  const nextParam =
+    requestUrl.searchParams.get("next");
 
-  if (!token_hash || !type) {
+  const next =
+    nextParam &&
+    nextParam.startsWith("/") &&
+    !nextParam.startsWith("//")
+      ? nextParam
+      : "/reset-password";
+
+  if (!token_hash) {
     return NextResponse.redirect(
       new URL(
-        "/reset-password?error=missing_confirmation",
-        requestUrl.origin
+        "/reset-password?error=missing-token",
+        request.url
       )
     );
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
+  let response = NextResponse.redirect(
+    new URL(next, request.url)
   );
 
-  const { error } = await supabase.auth.verifyOtp({
-    token_hash,
-    type,
-  });
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+
+        setAll(
+          cookiesToSet: {
+            name: string;
+            value: string;
+            options?: CookieOptions;
+          }[]
+        ) {
+          cookiesToSet.forEach(
+            ({ name, value }) => {
+              request.cookies.set(
+                name,
+                value
+              );
+            }
+          );
+
+          response = NextResponse.redirect(
+            new URL(next, request.url)
+          );
+
+          cookiesToSet.forEach(
+            ({
+              name,
+              value,
+              options,
+            }) => {
+              response.cookies.set(
+                name,
+                value,
+                options
+              );
+            }
+          );
+        },
+      },
+    }
+  );
+
+  const otpType: EmailOtpType =
+    type || "recovery";
+
+  const { error } =
+    await supabase.auth.verifyOtp({
+      token_hash,
+      type: otpType,
+    });
 
   if (error) {
     console.error(
@@ -41,13 +98,11 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.redirect(
       new URL(
-        "/reset-password?error=invalid_or_expired",
-        requestUrl.origin
+        "/reset-password?error=invalid-or-expired",
+        request.url
       )
     );
   }
 
-  return NextResponse.redirect(
-    new URL(next, requestUrl.origin)
-  );
+  return response;
 }
