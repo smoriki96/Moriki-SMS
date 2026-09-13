@@ -1,99 +1,53 @@
-import { createServerClient } from "@supabase/ssr";
+import { createClient, type EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
 
-  const tokenHash =
+  const token_hash =
     requestUrl.searchParams.get("token_hash");
 
   const type =
-    requestUrl.searchParams.get("type");
-
-  const requestedNext =
-    requestUrl.searchParams.get("next");
+    requestUrl.searchParams.get("type") as EmailOtpType | null;
 
   const next =
-    requestedNext &&
-    requestedNext.startsWith("/")
-      ? requestedNext
-      : "/reset-password";
+    requestUrl.searchParams.get("next") ||
+    "/reset-password";
 
-  if (!tokenHash || !type) {
+  if (!token_hash || !type) {
     return NextResponse.redirect(
       new URL(
-        "/reset-password?error=invalid_reset_link",
+        "/reset-password?error=missing_confirmation",
         requestUrl.origin
       )
     );
   }
 
-  let response = NextResponse.redirect(
-    new URL(next, requestUrl.origin)
-  );
-
-  const supabase = createServerClient(
+  const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(
-            ({ name, value }) => {
-              request.cookies.set(
-                name,
-                value
-              );
-            }
-          );
-
-          cookiesToSet.forEach(
-            ({
-              name,
-              value,
-              options,
-            }) => {
-              response.cookies.set(
-                name,
-                value,
-                options
-              );
-            }
-          );
-        },
-      },
-    }
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
   );
 
-  const {
-    error,
-  } = await supabase.auth.verifyOtp({
-    token_hash: tokenHash,
-    type: type as
-      | "signup"
-      | "invite"
-      | "recovery"
-      | "email"
-      | "email_change",
+  const { error } = await supabase.auth.verifyOtp({
+    token_hash,
+    type,
   });
 
   if (error) {
     console.error(
-      "SUPABASE AUTH CONFIRM ERROR:",
+      "AUTH CONFIRM ERROR:",
       error.message
     );
 
     return NextResponse.redirect(
       new URL(
-        "/reset-password?error=invalid_reset_link",
+        "/reset-password?error=invalid_or_expired",
         requestUrl.origin
       )
     );
   }
 
-  return response;
+  return NextResponse.redirect(
+    new URL(next, requestUrl.origin)
+  );
 }
