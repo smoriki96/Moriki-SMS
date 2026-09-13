@@ -1,22 +1,29 @@
 import { createServerClient } from "@supabase/ssr";
-import { NextResponse, type NextRequest } from "next/server";
+import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 
-export const dynamic = "force-dynamic";
+export async function GET(request: Request) {
+  const requestUrl = new URL(request.url);
 
-export async function GET(request: NextRequest) {
-  const url = new URL(request.url);
-
-  const code = url.searchParams.get("code");
+  const code = requestUrl.searchParams.get("code");
   const nextParam =
-    url.searchParams.get("next") || "/reset-password";
+    requestUrl.searchParams.get("next") || "/reset-password";
 
   const next =
-    nextParam.startsWith("/") &&
-    !nextParam.startsWith("//")
+    nextParam.startsWith("/") && !nextParam.startsWith("//")
       ? nextParam
       : "/reset-password";
 
-  let response = NextResponse.next();
+  if (!code) {
+    return NextResponse.redirect(
+      new URL(
+        "/reset-password?error=missing_code",
+        requestUrl.origin
+      )
+    );
+  }
+
+  const cookieStore = await cookies();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,34 +31,13 @@ export async function GET(request: NextRequest) {
     {
       cookies: {
         getAll() {
-          return request.cookies.getAll();
+          return cookieStore.getAll();
         },
 
         setAll(cookiesToSet) {
           cookiesToSet.forEach(
-            ({ name, value }) => {
-              request.cookies.set(
-                name,
-                value
-              );
-            }
-          );
-
-          response = NextResponse.next({
-            request,
-          });
-
-          cookiesToSet.forEach(
-            ({
-              name,
-              value,
-              options,
-            }) => {
-              response.cookies.set(
-                name,
-                value,
-                options
-              );
+            ({ name, value, options }) => {
+              cookieStore.set(name, value, options);
             }
           );
         },
@@ -59,19 +45,8 @@ export async function GET(request: NextRequest) {
     }
   );
 
-  if (!code) {
-    return NextResponse.redirect(
-      new URL(
-        "/login?error=missing_reset_code",
-        request.url
-      )
-    );
-  }
-
   const { error } =
-    await supabase.auth.exchangeCodeForSession(
-      code
-    );
+    await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
     console.error(
@@ -81,28 +56,13 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.redirect(
       new URL(
-        "/login?error=reset_link_invalid",
-        request.url
+        "/reset-password?error=invalid_code",
+        requestUrl.origin
       )
     );
   }
 
-  const redirectResponse =
-    NextResponse.redirect(
-      new URL(
-        next,
-        request.url
-      )
-    );
-
-  response.cookies
-    .getAll()
-    .forEach((cookie) => {
-      redirectResponse.cookies.set(
-        cookie.name,
-        cookie.value
-      );
-    });
-
-  return redirectResponse;
+  return NextResponse.redirect(
+    new URL(next, requestUrl.origin)
+  );
 }
