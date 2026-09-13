@@ -3,23 +3,17 @@ import { NextResponse, type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 
 export async function GET(request: NextRequest) {
-  const requestUrl = new URL(request.url);
+  const { searchParams, origin } = request.nextUrl;
 
-  const tokenHash =
-    requestUrl.searchParams.get("token_hash");
+  const token_hash = searchParams.get("token_hash");
+  const type = searchParams.get("type");
+  const next = searchParams.get("next") || "/reset-password";
 
-  const type =
-    requestUrl.searchParams.get("type");
-
-  const next =
-    requestUrl.searchParams.get("next") ||
-    "/reset-password";
-
-  if (!tokenHash) {
+  if (!token_hash || type !== "recovery") {
     return NextResponse.redirect(
       new URL(
-        "/reset-password?error=missing_token",
-        request.url
+        "/login?error=invalid-reset-link",
+        origin
       )
     );
   }
@@ -50,44 +44,38 @@ export async function GET(request: NextRequest) {
     }
   );
 
-  const allowedType =
-    type === "recovery"
-      ? "recovery"
-      : null;
-
-  if (!allowedType) {
-    return NextResponse.redirect(
-      new URL(
-        "/reset-password?error=invalid_type",
-        request.url
-      )
-    );
-  }
-
   const { error } =
     await supabase.auth.verifyOtp({
-      token_hash: tokenHash,
+      token_hash,
       type: "recovery",
     });
 
   if (error) {
     console.error(
-      "PASSWORD RECOVERY CONFIRM ERROR:",
+      "PASSWORD RESET CONFIRM ERROR:",
       error.message
     );
 
     return NextResponse.redirect(
       new URL(
-        "/reset-password?error=expired",
-        request.url
+        "/login?error=invalid-reset-link",
+        origin
       )
     );
   }
 
+  /*
+   * Only allow internal paths.
+   * This prevents the reset link from
+   * redirecting users to another website.
+   */
+  const safeNext =
+    next.startsWith("/") &&
+    !next.startsWith("//")
+      ? next
+      : "/reset-password";
+
   return NextResponse.redirect(
-    new URL(
-      next,
-      request.url
-    )
+    new URL(safeNext, origin)
   );
 }
