@@ -1,24 +1,36 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { cookies } from "next/headers";
 
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = request.nextUrl;
+  const requestUrl = new URL(request.url);
 
-  const token_hash = searchParams.get("token_hash");
-  const type = searchParams.get("type");
-  const next = searchParams.get("next") || "/reset-password";
+  const tokenHash =
+    requestUrl.searchParams.get("token_hash");
 
-  if (!token_hash || type !== "recovery") {
+  const type =
+    requestUrl.searchParams.get("type");
+
+  const requestedNext =
+    requestUrl.searchParams.get("next");
+
+  const next =
+    requestedNext &&
+    requestedNext.startsWith("/")
+      ? requestedNext
+      : "/reset-password";
+
+  if (!tokenHash || !type) {
     return NextResponse.redirect(
       new URL(
-        "/login?error=invalid-reset-link",
-        origin
+        "/reset-password?error=invalid_reset_link",
+        requestUrl.origin
       )
     );
   }
 
-  const cookieStore = await cookies();
+  let response = NextResponse.redirect(
+    new URL(next, requestUrl.origin)
+  );
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -26,13 +38,26 @@ export async function GET(request: NextRequest) {
     {
       cookies: {
         getAll() {
-          return cookieStore.getAll();
+          return request.cookies.getAll();
         },
 
         setAll(cookiesToSet) {
           cookiesToSet.forEach(
-            ({ name, value, options }) => {
-              cookieStore.set(
+            ({ name, value }) => {
+              request.cookies.set(
+                name,
+                value
+              );
+            }
+          );
+
+          cookiesToSet.forEach(
+            ({
+              name,
+              value,
+              options,
+            }) => {
+              response.cookies.set(
                 name,
                 value,
                 options
@@ -44,38 +69,31 @@ export async function GET(request: NextRequest) {
     }
   );
 
-  const { error } =
-    await supabase.auth.verifyOtp({
-      token_hash,
-      type: "recovery",
-    });
+  const {
+    error,
+  } = await supabase.auth.verifyOtp({
+    token_hash: tokenHash,
+    type: type as
+      | "signup"
+      | "invite"
+      | "recovery"
+      | "email"
+      | "email_change",
+  });
 
   if (error) {
     console.error(
-      "PASSWORD RESET CONFIRM ERROR:",
+      "SUPABASE AUTH CONFIRM ERROR:",
       error.message
     );
 
     return NextResponse.redirect(
       new URL(
-        "/login?error=invalid-reset-link",
-        origin
+        "/reset-password?error=invalid_reset_link",
+        requestUrl.origin
       )
     );
   }
 
-  /*
-   * Only allow internal paths.
-   * This prevents the reset link from
-   * redirecting users to another website.
-   */
-  const safeNext =
-    next.startsWith("/") &&
-    !next.startsWith("//")
-      ? next
-      : "/reset-password";
-
-  return NextResponse.redirect(
-    new URL(safeNext, origin)
-  );
+  return response;
 }
