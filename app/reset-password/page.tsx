@@ -57,7 +57,7 @@ export default function ResetPasswordPage() {
       }
 
       showSuccess(
-        "A 6-digit password reset code has been sent to your email."
+        "A 8-digit password reset code has been sent to your email."
       );
 
       setStep("code");
@@ -83,12 +83,12 @@ export default function ResetPasswordPage() {
     const cleanCode = code.trim();
 
     if (!cleanCode) {
-      showError("Please enter the 6-digit code.");
+      showError("Please enter the 8-digit code.");
       return;
     }
 
-    if (!/^\d{6}$/.test(cleanCode)) {
-      showError("The code must contain exactly 6 digits.");
+    if (!/^\d{8}$/.test(cleanCode)) {
+      showError("The code must contain exactly 8 digits.");
       return;
     }
 
@@ -145,9 +145,9 @@ export default function ResetPasswordPage() {
       return;
     }
 
-    if (password.length < 6) {
+    if (password.length < 8) {
       showError(
-        "Password must be at least 6 characters."
+        "Password must be at least 8 characters."
       );
       return;
     }
@@ -218,7 +218,7 @@ export default function ResetPasswordPage() {
       }
 
       showSuccess(
-        "A new 6-digit code has been sent to your email."
+        "A new 8-digit code has been sent to your email."
       );
     } catch (error) {
       showError(
@@ -248,10 +248,10 @@ export default function ResetPasswordPage() {
 
           <p className="mt-2 text-sm text-slate-400">
             {step === "email" &&
-              "Enter your email and we will send you a 6-digit reset code."}
+              "Enter your email and we will send you an 8-digit reset code."}
 
             {step === "code" &&
-              "Check your email and enter the 6-digit code we sent you."}
+              "Check your email and enter the 8-digit code we sent you."}
 
             {step === "password" &&
               "Create a new password for your Moriki SMS account."}
@@ -321,26 +321,26 @@ export default function ResetPasswordPage() {
                   htmlFor="code"
                   className="mb-2 block text-sm font-medium text-slate-200"
                 >
-                  6-digit reset code
+                  8-digit reset code
                 </label>
 
                 <input
                   id="code"
                   type="text"
                   inputMode="numeric"
-                  maxLength={6}
+                  maxLength={8}
                   value={code}
                   onChange={(e) =>
                     setCode(
                       e.target.value
                         .replace(/\D/g, "")
-                        .slice(0, 6)
+                        .slice(0, 8)
                     )
                   }
-                  placeholder="123456"
+                  placeholder="12345678"
                   autoComplete="one-time-code"
                   disabled={loading}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-center text-2xl font-bold tracking-[0.5em] text-white outline-none transition placeholder:text-slate-600 focus:border-white disabled:opacity-60"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-center text-2xl font-bold tracking-[0.3em] text-white outline-none transition placeholder:text-slate-600 focus:border-white disabled:opacity-60"
                 />
               </div>
 
@@ -431,7 +431,7 @@ export default function ResetPasswordPage() {
             onClick={() => router.push("/login")}
             className="mt-5 w-full text-sm text-slate-400 transition hover:text-white"
           >
-            ? Back to login
+            ← Back to login
           </button>
 
         </div>
