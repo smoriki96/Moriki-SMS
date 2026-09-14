@@ -1,207 +1,164 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase";
-import { Suspense } from "react";
 
-function ResetPasswordForm() {
+export default function ResetPasswordPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+
+  const [step, setStep] = useState<"email" | "code" | "password">("email");
 
   const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  const [recoveryMode, setRecoveryMode] = useState(false);
-  const [checking, setChecking] = useState(true);
-
+  const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] =
     useState<"error" | "success">("error");
 
-  const [loading, setLoading] = useState(false);
+  function showError(text: string) {
+    setMessage(text);
+    setMessageType("error");
+  }
 
-  useEffect(() => {
-    let mounted = true;
+  function showSuccess(text: string) {
+    setMessage(text);
+    setMessageType("success");
+  }
 
-    async function checkRecoverySession() {
-      try {
-        const errorParam =
-          searchParams.get("error");
-
-        if (errorParam === "invalid_code") {
-          setMessage(
-            "This password reset link is invalid or has expired. Please request a new one."
-          );
-          setMessageType("error");
-          setRecoveryMode(false);
-          setChecking(false);
-          return;
-        }
-
-        if (errorParam === "missing_code") {
-          setMessage(
-            "Invalid password reset request. Please request a new reset link."
-          );
-          setMessageType("error");
-          setRecoveryMode(false);
-          setChecking(false);
-          return;
-        }
-
-        const { data, error } =
-          await supabase.auth.getSession();
-
-        if (error) {
-          console.error(
-            "RECOVERY SESSION ERROR:",
-            error.message
-          );
-        }
-
-        if (!mounted) return;
-
-        setRecoveryMode(Boolean(data.session));
-        setChecking(false);
-      } catch (error) {
-        console.error(
-          "RECOVERY CHECK ERROR:",
-          error
-        );
-
-        if (mounted) {
-          setRecoveryMode(false);
-          setChecking(false);
-          setMessage(
-            "Unable to verify the password reset request."
-          );
-          setMessageType("error");
-        }
-      }
-    }
-
-    checkRecoverySession();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (
-          event === "PASSWORD_RECOVERY" &&
-          session
-        ) {
-          setRecoveryMode(true);
-          setMessage("");
-          setChecking(false);
-        }
-      }
-    );
-
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, [searchParams]);
-
-  async function handleSendResetLink(
+  async function sendCode(
     e: React.FormEvent<HTMLFormElement>
   ) {
     e.preventDefault();
 
     setMessage("");
-    setMessageType("error");
 
-    const cleanEmail = email.trim();
+    const cleanEmail = email.trim().toLowerCase();
 
     if (!cleanEmail) {
-      setMessage(
-        "Please enter your email address."
-      );
+      showError("Please enter your email address.");
       return;
     }
 
     setLoading(true);
 
     try {
-      const siteUrl =
-        process.env.NEXT_PUBLIC_SITE_URL ||
-        window.location.origin;
-
-      const callbackUrl =
-        `${siteUrl.replace(/\/$/, "")}/auth/callback?next=/reset-password`;
-
       const { error } =
         await supabase.auth.resetPasswordForEmail(
-          cleanEmail,
-          {
-            redirectTo: callbackUrl,
-          }
+          cleanEmail
         );
 
       if (error) {
-        console.error(
-          "SEND RESET ERROR:",
-          error
-        );
-
-        setMessage(error.message);
+        showError(error.message);
         return;
       }
 
-      setMessage(
-        "Password reset link sent. Please check your email and open the new link."
-      );
-      setMessageType("success");
-    } catch (error) {
-      console.error(
-        "SEND RESET ERROR:",
-        error
+      showSuccess(
+        "A 6-digit password reset code has been sent to your email."
       );
 
-      setMessage(
+      setStep("code");
+    } catch (error) {
+      showError(
         error instanceof Error
           ? error.message
-          : "Something went wrong while sending the reset link."
+          : "Unable to send the reset code."
       );
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleUpdatePassword(
+  async function verifyCode(
     e: React.FormEvent<HTMLFormElement>
   ) {
     e.preventDefault();
 
     setMessage("");
-    setMessageType("error");
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanCode = code.trim();
+
+    if (!cleanCode) {
+      showError("Please enter the 6-digit code.");
+      return;
+    }
+
+    if (!/^\d{6}$/.test(cleanCode)) {
+      showError("The code must contain exactly 6 digits.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const { data, error } =
+        await supabase.auth.verifyOtp({
+          email: cleanEmail,
+          token: cleanCode,
+          type: "recovery",
+        });
+
+      if (error) {
+        showError(
+          error.message ||
+            "The code is invalid or expired. Please request a new code."
+        );
+        return;
+      }
+
+      if (!data.session) {
+        showError(
+          "The code was verified, but a recovery session was not created. Please request a new code."
+        );
+        return;
+      }
+
+      showSuccess(
+        "Code verified. You can now create a new password."
+      );
+
+      setStep("password");
+    } catch (error) {
+      showError(
+        error instanceof Error
+          ? error.message
+          : "Unable to verify the code."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function updatePassword(
+    e: React.FormEvent<HTMLFormElement>
+  ) {
+    e.preventDefault();
+
+    setMessage("");
 
     if (!password) {
-      setMessage(
-        "Please enter a new password."
-      );
+      showError("Please enter a new password.");
       return;
     }
 
     if (password.length < 6) {
-      setMessage(
+      showError(
         "Password must be at least 6 characters."
       );
       return;
     }
 
     if (!confirmPassword) {
-      setMessage(
-        "Please confirm your new password."
-      );
+      showError("Please confirm your new password.");
       return;
     }
 
     if (password !== confirmPassword) {
-      setMessage(
-        "Passwords do not match."
-      );
+      showError("Passwords do not match.");
       return;
     }
 
@@ -214,19 +171,13 @@ function ResetPasswordForm() {
         });
 
       if (error) {
-        console.error(
-          "UPDATE PASSWORD ERROR:",
-          error
-        );
-
-        setMessage(error.message);
+        showError(error.message);
         return;
       }
 
-      setMessage(
-        "Password updated successfully. Redirecting to login..."
+      showSuccess(
+        "Password changed successfully. Redirecting to login..."
       );
-      setMessageType("success");
 
       await supabase.auth.signOut();
 
@@ -234,37 +185,55 @@ function ResetPasswordForm() {
         router.replace("/login");
       }, 1500);
     } catch (error) {
-      console.error(
-        "UPDATE PASSWORD ERROR:",
-        error
-      );
-
-      setMessage(
+      showError(
         error instanceof Error
           ? error.message
-          : "Something went wrong while updating your password."
+          : "Unable to update your password."
       );
     } finally {
       setLoading(false);
     }
   }
 
-  if (checking) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-6">
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-700 border-t-white" />
-          <p className="text-slate-400">
-            Checking password reset...
-          </p>
-        </div>
-      </main>
-    );
+  async function resendCode() {
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail) {
+      setStep("email");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const { error } =
+        await supabase.auth.resetPasswordForEmail(
+          cleanEmail
+        );
+
+      if (error) {
+        showError(error.message);
+        return;
+      }
+
+      showSuccess(
+        "A new 6-digit code has been sent to your email."
+      );
+    } catch (error) {
+      showError(
+        error instanceof Error
+          ? error.message
+          : "Unable to resend the code."
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-6">
-      <div className="w-full max-w-md px-2">
+      <div className="w-full max-w-md">
 
         <div className="mb-8 text-center">
           <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-xl font-black text-slate-950 shadow-lg">
@@ -272,15 +241,20 @@ function ResetPasswordForm() {
           </div>
 
           <h1 className="text-3xl font-bold tracking-tight">
-            {recoveryMode
-              ? "Create new password"
-              : "Forgot password?"}
+            {step === "email" && "Forgot password?"}
+            {step === "code" && "Enter reset code"}
+            {step === "password" && "Create new password"}
           </h1>
 
           <p className="mt-2 text-sm text-slate-400">
-            {recoveryMode
-              ? "Create a new password for your Moriki SMS account."
-              : "Enter your email address and we will send you a password reset link."}
+            {step === "email" &&
+              "Enter your email and we will send you a 6-digit reset code."}
+
+            {step === "code" &&
+              "Check your email and enter the 6-digit code we sent you."}
+
+            {step === "password" &&
+              "Create a new password for your Moriki SMS account."}
           </p>
         </div>
 
@@ -298,9 +272,9 @@ function ResetPasswordForm() {
             </div>
           )}
 
-          {!recoveryMode ? (
+          {step === "email" && (
             <form
-              onSubmit={handleSendResetLink}
+              onSubmit={sendCode}
               className="space-y-5"
             >
               <div>
@@ -321,23 +295,79 @@ function ResetPasswordForm() {
                   placeholder="Enter your email"
                   autoComplete="email"
                   disabled={loading}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none placeholder:text-slate-600 focus:border-white disabled:opacity-60"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-white disabled:opacity-60"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full rounded-xl bg-white px-4 py-3 font-semibold text-slate-950 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-xl bg-white px-4 py-3 font-semibold text-slate-950 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loading
-                  ? "Sending reset link..."
-                  : "Send reset link"}
+                  ? "Sending code..."
+                  : "Send reset code"}
               </button>
             </form>
-          ) : (
+          )}
+
+          {step === "code" && (
             <form
-              onSubmit={handleUpdatePassword}
+              onSubmit={verifyCode}
+              className="space-y-5"
+            >
+              <div>
+                <label
+                  htmlFor="code"
+                  className="mb-2 block text-sm font-medium text-slate-200"
+                >
+                  6-digit reset code
+                </label>
+
+                <input
+                  id="code"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={code}
+                  onChange={(e) =>
+                    setCode(
+                      e.target.value
+                        .replace(/\D/g, "")
+                        .slice(0, 6)
+                    )
+                  }
+                  placeholder="123456"
+                  autoComplete="one-time-code"
+                  disabled={loading}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-center text-2xl font-bold tracking-[0.5em] text-white outline-none transition placeholder:text-slate-600 focus:border-white disabled:opacity-60"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-xl bg-white px-4 py-3 font-semibold text-slate-950 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading
+                  ? "Verifying..."
+                  : "Verify code"}
+              </button>
+
+              <button
+                type="button"
+                onClick={resendCode}
+                disabled={loading}
+                className="w-full text-sm text-slate-400 transition hover:text-white disabled:opacity-50"
+              >
+                Send me a new code
+              </button>
+            </form>
+          )}
+
+          {step === "password" && (
+            <form
+              onSubmit={updatePassword}
               className="space-y-5"
             >
               <div>
@@ -358,7 +388,7 @@ function ResetPasswordForm() {
                   placeholder="Enter new password"
                   autoComplete="new-password"
                   disabled={loading}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none placeholder:text-slate-600 focus:border-white disabled:opacity-60"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-white disabled:opacity-60"
                 />
               </div>
 
@@ -380,14 +410,14 @@ function ResetPasswordForm() {
                   placeholder="Confirm new password"
                   autoComplete="new-password"
                   disabled={loading}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none placeholder:text-slate-600 focus:border-white disabled:opacity-60"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-white disabled:opacity-60"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full rounded-xl bg-white px-4 py-3 font-semibold text-slate-950 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-xl bg-white px-4 py-3 font-semibold text-slate-950 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loading
                   ? "Updating password..."
@@ -399,28 +429,13 @@ function ResetPasswordForm() {
           <button
             type="button"
             onClick={() => router.push("/login")}
-            className="mt-5 w-full text-sm text-slate-400 hover:text-white"
+            className="mt-5 w-full text-sm text-slate-400 transition hover:text-white"
           >
             ? Back to login
           </button>
+
         </div>
       </div>
     </main>
-  );
-}
-
-export default function ResetPasswordPage() {
-  return (
-    <Suspense
-      fallback={
-        <main className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
-          <p className="text-slate-400">
-            Loading...
-          </p>
-        </main>
-      }
-    >
-      <ResetPasswordForm />
-    </Suspense>
   );
 }
