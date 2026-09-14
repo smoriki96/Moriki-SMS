@@ -1,8 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
 
   const code = requestUrl.searchParams.get("code");
@@ -13,13 +12,15 @@ export async function GET(request: Request) {
   if (!code) {
     return NextResponse.redirect(
       new URL(
-        "/reset-password?error=missing_code",
+        "/login?error=missing_reset_code",
         requestUrl.origin
       )
     );
   }
 
-  const cookieStore = await cookies();
+  let response = NextResponse.redirect(
+    new URL(next, requestUrl.origin)
+  );
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -27,13 +28,30 @@ export async function GET(request: Request) {
     {
       cookies: {
         getAll() {
-          return cookieStore.getAll();
+          return request.cookies.getAll();
         },
 
         setAll(cookiesToSet) {
           cookiesToSet.forEach(
-            ({ name, value, options }) => {
-              cookieStore.set(
+            ({ name, value }) => {
+              request.cookies.set(
+                name,
+                value
+              );
+            }
+          );
+
+          response = NextResponse.redirect(
+            new URL(next, requestUrl.origin)
+          );
+
+          cookiesToSet.forEach(
+            ({
+              name,
+              value,
+              options,
+            }) => {
+              response.cookies.set(
                 name,
                 value,
                 options
@@ -45,14 +63,16 @@ export async function GET(request: Request) {
     }
   );
 
-  const { error } =
+  const {
+    error,
+  } =
     await supabase.auth.exchangeCodeForSession(
       code
     );
 
   if (error) {
     console.error(
-      "AUTH CALLBACK ERROR:",
+      "PASSWORD RESET CALLBACK ERROR:",
       error.message
     );
 
@@ -64,10 +84,5 @@ export async function GET(request: Request) {
     );
   }
 
-  return NextResponse.redirect(
-    new URL(
-      next.startsWith("/") ? next : "/reset-password",
-      requestUrl.origin
-    )
-  );
+  return response;
 }
