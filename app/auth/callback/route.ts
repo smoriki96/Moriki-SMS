@@ -1,7 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
-import { NextResponse, type NextRequest } from "next/server";
+import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
 
   const code = requestUrl.searchParams.get("code");
@@ -12,15 +13,13 @@ export async function GET(request: NextRequest) {
   if (!code) {
     return NextResponse.redirect(
       new URL(
-        "/login?error=missing_reset_code",
+        "/login?error=Password+reset+link+is+invalid",
         requestUrl.origin
       )
     );
   }
 
-  let response = NextResponse.redirect(
-    new URL(next, requestUrl.origin)
-  );
+  const cookieStore = await cookies();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -28,30 +27,12 @@ export async function GET(request: NextRequest) {
     {
       cookies: {
         getAll() {
-          return request.cookies.getAll();
+          return cookieStore.getAll();
         },
-
         setAll(cookiesToSet) {
           cookiesToSet.forEach(
-            ({ name, value }) => {
-              request.cookies.set(
-                name,
-                value
-              );
-            }
-          );
-
-          response = NextResponse.redirect(
-            new URL(next, requestUrl.origin)
-          );
-
-          cookiesToSet.forEach(
-            ({
-              name,
-              value,
-              options,
-            }) => {
-              response.cookies.set(
+            ({ name, value, options }) => {
+              cookieStore.set(
                 name,
                 value,
                 options
@@ -63,26 +44,26 @@ export async function GET(request: NextRequest) {
     }
   );
 
-  const {
-    error,
-  } =
+  const { error } =
     await supabase.auth.exchangeCodeForSession(
       code
     );
 
   if (error) {
     console.error(
-      "PASSWORD RESET CALLBACK ERROR:",
+      "AUTH CALLBACK ERROR:",
       error.message
     );
 
     return NextResponse.redirect(
       new URL(
-        "/reset-password?error=invalid_or_expired",
+        "/login?error=Password+reset+link+is+invalid+or+expired",
         requestUrl.origin
       )
     );
   }
 
-  return response;
+  return NextResponse.redirect(
+    new URL(next, requestUrl.origin)
+  );
 }
