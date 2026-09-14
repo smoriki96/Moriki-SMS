@@ -6,13 +6,9 @@ export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
 
   const code = requestUrl.searchParams.get("code");
-  const nextParam =
-    requestUrl.searchParams.get("next") || "/reset-password";
-
   const next =
-    nextParam.startsWith("/") && !nextParam.startsWith("//")
-      ? nextParam
-      : "/reset-password";
+    requestUrl.searchParams.get("next") ||
+    "/reset-password";
 
   if (!code) {
     return NextResponse.redirect(
@@ -37,7 +33,11 @@ export async function GET(request: Request) {
         setAll(cookiesToSet) {
           cookiesToSet.forEach(
             ({ name, value, options }) => {
-              cookieStore.set(name, value, options);
+              cookieStore.set(
+                name,
+                value,
+                options
+              );
             }
           );
         },
@@ -46,7 +46,9 @@ export async function GET(request: Request) {
   );
 
   const { error } =
-    await supabase.auth.exchangeCodeForSession(code);
+    await supabase.auth.exchangeCodeForSession(
+      code
+    );
 
   if (error) {
     console.error(
@@ -56,13 +58,16 @@ export async function GET(request: Request) {
 
     return NextResponse.redirect(
       new URL(
-        "/reset-password?error=invalid_code",
+        "/reset-password?error=invalid_or_expired",
         requestUrl.origin
       )
     );
   }
 
   return NextResponse.redirect(
-    new URL(next, requestUrl.origin)
+    new URL(
+      next.startsWith("/") ? next : "/reset-password",
+      requestUrl.origin
+    )
   );
 }
