@@ -6,293 +6,334 @@ export default function HomePage() {
   return (
     <main className="min-h-screen bg-slate-950 text-white">
 
-      <header className="border-b border-slate-800/80 bg-slate-950/90 backdrop-blur">
+      {/* NAVBAR */}
+      <header className="border-b border-slate-800">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
 
           <Link
             href="/"
             className="text-2xl font-black tracking-tight"
           >
-            <span className="text-white">Moriki</span>
-            <span className="text-blue-500"> SMS</span>
+            Moriki <span className="text-blue-500">SMS</span>
           </Link>
 
-          <nav className="hidden items-center gap-8 md:flex">
+          <nav className="hidden items-center gap-8 text-sm text-slate-300 md:flex">
             <Link
+              href="/"
+              className="transition hover:text-white"
+            >
+              Home
+            </Link>
+
+            <Link
+              href="/numbers"
+              className="transition hover:text-white"
+            >
+              Virtual Numbers
+            </Link>
+
+            <a
               href="#how-it-works"
-              className="text-sm font-medium text-slate-300 transition hover:text-white"
+              className="transition hover:text-white"
             >
               How it works
-            </Link>
-
-            <Link
-              href="#numbers"
-              className="text-sm font-medium text-slate-300 transition hover:text-white"
-            >
-              Virtual numbers
-            </Link>
+            </a>
           </nav>
 
-          <Link
-            href="/register"
-            className="rounded-xl bg-white px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-slate-200"
-          >
-            Get started
-          </Link>
+          <div className="flex items-center gap-3">
 
-        </div>
-      </header>
-
-      <section className="relative overflow-hidden">
-
-        <div className="pointer-events-none absolute left-1/2 top-20 h-96 w-96 -translate-x-1/2 rounded-full bg-blue-600/10 blur-3xl" />
-
-        <div className="relative mx-auto max-w-6xl px-6 pb-24 pt-24 text-center md:pb-32 md:pt-32">
-
-          <div className="mx-auto mb-6 inline-flex items-center rounded-full border border-blue-500/20 bg-blue-500/10 px-4 py-2 text-sm text-blue-300">
-            Virtual numbers made simple
-          </div>
-
-          <h1 className="text-5xl font-black tracking-tight sm:text-6xl md:text-8xl">
-            <span className="text-white">Moriki</span>
-            <span className="text-blue-500"> SMS</span>
-          </h1>
-
-          <p className="mx-auto mt-7 max-w-2xl text-lg leading-8 text-slate-400 md:text-xl">
-            Get reliable virtual phone numbers for SMS verification,
-            messaging and online services � all in one simple platform.
-          </p>
-
-          <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
+            <Link
+              href="/login"
+              className="hidden rounded-xl px-4 py-2 text-sm font-semibold text-slate-300 transition hover:text-white sm:block"
+            >
+              Login
+            </Link>
 
             <Link
               href="/register"
-              className="w-full rounded-xl bg-white px-8 py-4 font-bold text-slate-950 shadow-xl transition hover:bg-slate-200 sm:w-auto"
+              className="rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-slate-950 transition hover:bg-slate-200"
             >
-              Get started
-            </Link>
-
-            <Link
-              href="#how-it-works"
-              className="w-full rounded-xl border border-slate-700 bg-slate-900 px-8 py-4 font-semibold text-white transition hover:border-slate-500 hover:bg-slate-800 sm:w-auto"
-            >
-              How it works
+              Get Started
             </Link>
 
           </div>
-
         </div>
-      </section>
+      </header>
 
-      <section
-        id="numbers"
-        className="border-y border-slate-800 bg-slate-900/40"
-      >
-        <div className="mx-auto max-w-7xl px-6 py-20">
 
-          <div className="mx-auto max-w-2xl text-center">
+      {/* HERO */}
+      <section className="relative overflow-hidden">
 
-            <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
-              Virtual numbers
-            </p>
-
-            <h2 className="mt-3 text-3xl font-bold md:text-5xl">
-              Choose the number you need
-            </h2>
-
-            <p className="mt-4 text-slate-400">
-              Select a country and service, then get your virtual number
-              when you need it.
-            </p>
-
-          </div>
-
-          <div className="mt-12 grid gap-6 md:grid-cols-2">
-
-            <div className="rounded-3xl border border-slate-800 bg-slate-950 p-7 transition hover:-translate-y-1 hover:border-blue-500/40">
-
-              <div className="flex items-center justify-between">
-
-                <div>
-                  <div className="text-4xl">????</div>
-
-                  <h3 className="mt-4 text-2xl font-bold">
-                    United States
-                  </h3>
-
-                  <p className="mt-2 text-slate-400">
-                    USA virtual numbers
-                  </p>
-                </div>
-
-                <div className="text-right">
-                  <p className="text-sm text-slate-500">
-                    Starting from
-                  </p>
-
-                  <p className="mt-1 text-2xl font-bold">
-                    $5
-                  </p>
-                </div>
-
-              </div>
-
-              <Link
-                href="/numbers?country=US"
-                className="mt-7 block rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-slate-200"
-              >
-                View numbers
-              </Link>
-
-            </div>
-
-            <div className="rounded-3xl border border-slate-800 bg-slate-950 p-7 transition hover:-translate-y-1 hover:border-blue-500/40">
-
-              <div className="flex items-center justify-between">
-
-                <div>
-                  <div className="text-4xl">????</div>
-
-                  <h3 className="mt-4 text-2xl font-bold">
-                    Mexico
-                  </h3>
-
-                  <p className="mt-2 text-slate-400">
-                    Mexico virtual numbers
-                  </p>
-                </div>
-
-                <div className="text-right">
-                  <p className="text-sm text-slate-500">
-                    Starting from
-                  </p>
-
-                  <p className="mt-1 text-2xl font-bold">
-                    $4
-                  </p>
-                </div>
-
-              </div>
-
-              <Link
-                href="/numbers?country=MX"
-                className="mt-7 block rounded-xl bg-white px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-slate-200"
-              >
-                View numbers
-              </Link>
-
-            </div>
-
-          </div>
-
-        </div>
-      </section>
-
-      <section
-        id="how-it-works"
-        className="mx-auto max-w-7xl px-6 py-24"
-      >
-
-        <div className="text-center">
-
-          <p className="text-sm font-semibold uppercase tracking-widest text-blue-400">
-            Simple process
-          </p>
-
-          <h2 className="mt-3 text-3xl font-bold md:text-5xl">
-            How Moriki SMS works
-          </h2>
-
-          <p className="mx-auto mt-4 max-w-2xl text-slate-400">
-            Getting a virtual number takes only a few simple steps.
-          </p>
-
+        <div className="absolute inset-0">
+          <div className="absolute left-1/2 top-20 h-80 w-80 -translate-x-1/2 rounded-full bg-blue-600/10 blur-3xl" />
         </div>
 
-        <div className="mt-14 grid gap-6 md:grid-cols-3">
+        <div className="relative mx-auto max-w-7xl px-6 pb-24 pt-24 md:pb-32 md:pt-32">
 
-          <div className="rounded-3xl border border-slate-800 bg-slate-900 p-7">
+          <div className="mx-auto max-w-4xl text-center">
 
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-lg font-bold text-blue-400">
-              01
+            <div className="mb-6 inline-flex rounded-full border border-slate-800 bg-slate-900 px-4 py-2 text-sm text-slate-400">
+              Virtual numbers made simple
             </div>
 
-            <h3 className="mt-6 text-xl font-bold">
-              Create an account
-            </h3>
+            <h1 className="text-5xl font-black tracking-tight sm:text-6xl md:text-7xl">
+              MORIKI
+              <span className="text-blue-500"> SMS</span>
+            </h1>
 
-            <p className="mt-3 leading-7 text-slate-400">
-              Sign up for your Moriki SMS account and access your dashboard.
+            <p className="mx-auto mt-6 max-w-2xl text-lg leading-8 text-slate-400">
+              Get virtual numbers for SMS verification and online
+              services without using your personal phone number.
             </p>
 
-          </div>
-
-          <div className="rounded-3xl border border-slate-800 bg-slate-900 p-7">
-
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-lg font-bold text-blue-400">
-              02
-            </div>
-
-            <h3 className="mt-6 text-xl font-bold">
-              Choose a number
-            </h3>
-
-            <p className="mt-3 leading-7 text-slate-400">
-              Select the country and service you want and purchase an available number.
-            </p>
-
-          </div>
-
-          <div className="rounded-3xl border border-slate-800 bg-slate-900 p-7">
-
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-lg font-bold text-blue-400">
-              03
-            </div>
-
-            <h3 className="mt-6 text-xl font-bold">
-              Receive your SMS
-            </h3>
-
-            <p className="mt-3 leading-7 text-slate-400">
-              View your number and incoming verification messages directly from your account.
-            </p>
-
-          </div>
-
-        </div>
-
-      </section>
-
-      <section className="px-6 pb-24">
-
-        <div className="mx-auto max-w-7xl overflow-hidden rounded-[2rem] border border-slate-800 bg-slate-900">
-
-          <div className="relative px-6 py-24 text-center md:px-12 md:py-32">
-
-            <div className="pointer-events-none absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-600/10 blur-3xl" />
-
-            <div className="relative">
-
-              <p className="text-sm font-semibold uppercase tracking-[0.3em] text-blue-400">
-                Welcome to
-              </p>
-
-              <h2 className="mt-5 text-5xl font-black tracking-tight sm:text-6xl md:text-8xl">
-                <span className="text-white">Moriki</span>
-                <span className="text-blue-500"> SMS</span>
-              </h2>
-
-              <p className="mx-auto mt-7 max-w-xl text-lg leading-8 text-slate-400">
-                Virtual numbers made simple.
-                <br />
-                Fast. Simple. Built for you.
-              </p>
+            <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
 
               <Link
                 href="/register"
-                className="mt-10 inline-block rounded-xl bg-white px-8 py-4 font-bold text-slate-950 transition hover:bg-slate-200"
+                className="w-full rounded-2xl bg-white px-8 py-4 font-bold text-slate-950 shadow-xl transition hover:bg-slate-200 sm:w-auto"
               >
-                Create your account
+                Get Started
+              </Link>
+
+              <a
+                href="#how-it-works"
+                className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-8 py-4 font-semibold text-white transition hover:border-slate-500 sm:w-auto"
+              >
+                How it works
+              </a>
+
+            </div>
+
+          </div>
+
+
+          {/* BIG MORIKI SMS DESIGN */}
+          <div className="mx-auto mt-24 max-w-5xl">
+
+            <div className="relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/70 px-6 py-20 shadow-2xl sm:px-12 md:py-28">
+
+              <div className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-600/10 blur-3xl" />
+
+              <div className="relative text-center">
+
+                <p className="mb-5 text-sm font-semibold uppercase tracking-[0.35em] text-slate-500">
+                  Welcome to
+                </p>
+
+                <h2 className="text-5xl font-black tracking-tighter sm:text-7xl md:text-8xl">
+                  MORIKI
+                  <span className="text-blue-500"> SMS</span>
+                </h2>
+
+                <p className="mx-auto mt-6 max-w-xl text-slate-400">
+                  Your simple way to access virtual numbers
+                  whenever you need them.
+                </p>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+      </section>
+
+
+      {/* VIRTUAL NUMBERS */}
+      <section className="border-t border-slate-800 py-24">
+
+        <div className="mx-auto max-w-7xl px-6">
+
+          <div className="mx-auto max-w-2xl text-center">
+
+            <p className="text-sm font-bold uppercase tracking-widest text-blue-500">
+              Virtual Numbers
+            </p>
+
+            <h2 className="mt-4 text-3xl font-bold sm:text-4xl">
+              Numbers when you need them
+            </h2>
+
+            <p className="mt-4 text-slate-400">
+              Access virtual numbers through Moriki SMS and
+              receive verification messages without exposing
+              your personal number.
+            </p>
+
+          </div>
+
+          <div className="mt-14 grid gap-6 md:grid-cols-3">
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-7">
+              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-xl">
+                ??
+              </div>
+
+              <h3 className="text-xl font-bold">
+                Virtual Numbers
+              </h3>
+
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                Choose from available virtual numbers and use
+                them for supported online services.
+              </p>
+            </div>
+
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-7">
+              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-xl">
+                ??
+              </div>
+
+              <h3 className="text-xl font-bold">
+                Receive SMS
+              </h3>
+
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                Receive supported verification messages directly
+                through your Moriki SMS account.
+              </p>
+            </div>
+
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-7">
+              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-xl">
+                ?
+              </div>
+
+              <h3 className="text-xl font-bold">
+                Fast & Simple
+              </h3>
+
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                A straightforward dashboard designed to make
+                managing your virtual numbers easy.
+              </p>
+            </div>
+
+          </div>
+
+          <div className="mt-12 text-center">
+
+            <Link
+              href="/numbers"
+              className="inline-flex rounded-xl bg-white px-7 py-3.5 font-bold text-slate-950 transition hover:bg-slate-200"
+            >
+              View Virtual Numbers
+            </Link>
+
+          </div>
+
+        </div>
+      </section>
+
+
+      {/* HOW IT WORKS */}
+      <section
+        id="how-it-works"
+        className="border-t border-slate-800 py-24"
+      >
+
+        <div className="mx-auto max-w-7xl px-6">
+
+          <div className="mx-auto max-w-2xl text-center">
+
+            <p className="text-sm font-bold uppercase tracking-widest text-blue-500">
+              How it works
+            </p>
+
+            <h2 className="mt-4 text-3xl font-bold sm:text-4xl">
+              Simple from start to finish
+            </h2>
+
+          </div>
+
+
+          <div className="mt-14 grid gap-6 md:grid-cols-3">
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-8">
+
+              <div className="text-4xl font-black text-blue-500">
+                01
+              </div>
+
+              <h3 className="mt-6 text-xl font-bold">
+                Create an account
+              </h3>
+
+              <p className="mt-3 leading-7 text-slate-400">
+                Create your Moriki SMS account and access your
+                personal dashboard.
+              </p>
+
+            </div>
+
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-8">
+
+              <div className="text-4xl font-black text-blue-500">
+                02
+              </div>
+
+              <h3 className="mt-6 text-xl font-bold">
+                Choose a number
+              </h3>
+
+              <p className="mt-3 leading-7 text-slate-400">
+                Open the virtual numbers section and select an
+                available number for your supported service.
+              </p>
+
+            </div>
+
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-8">
+
+              <div className="text-4xl font-black text-blue-500">
+                03
+              </div>
+
+              <h3 className="mt-6 text-xl font-bold">
+                Receive your SMS
+              </h3>
+
+              <p className="mt-3 leading-7 text-slate-400">
+                View your activation and received messages from
+                your Moriki SMS dashboard.
+              </p>
+
+            </div>
+
+          </div>
+
+        </div>
+      </section>
+
+
+      {/* CTA */}
+      <section className="border-t border-slate-800 py-24">
+
+        <div className="mx-auto max-w-5xl px-6">
+
+          <div className="rounded-3xl border border-slate-800 bg-slate-900 px-6 py-16 text-center shadow-2xl sm:px-12">
+
+            <h2 className="text-3xl font-black sm:text-5xl">
+              Ready to get started?
+            </h2>
+
+            <p className="mx-auto mt-5 max-w-xl text-slate-400">
+              Create your Moriki SMS account and explore
+              available virtual numbers.
+            </p>
+
+            <div className="mt-8">
+
+              <Link
+                href="/register"
+                className="inline-flex rounded-xl bg-white px-8 py-4 font-bold text-slate-950 transition hover:bg-slate-200"
+              >
+                Get Started
               </Link>
 
             </div>
@@ -303,24 +344,24 @@ export default function HomePage() {
 
       </section>
 
+
+      {/* FOOTER */}
       <footer className="border-t border-slate-800">
 
-        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-5 px-6 py-8 md:flex-row">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-8 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
 
           <div>
-            <span className="font-black text-white">
-              Moriki
-            </span>
-            <span className="font-black text-blue-500">
-              {" "}SMS
-            </span>
+            © {new Date().getFullYear()} Moriki SMS
           </div>
 
-          <p className="text-sm text-slate-500">
-            Virtual numbers made simple.
-          </p>
+          <div className="flex gap-6">
 
-          <div className="flex gap-5 text-sm text-slate-400">
+            <Link
+              href="/numbers"
+              className="transition hover:text-white"
+            >
+              Virtual Numbers
+            </Link>
 
             <Link
               href="/login"
@@ -334,13 +375,6 @@ export default function HomePage() {
               className="transition hover:text-white"
             >
               Register
-            </Link>
-
-            <Link
-              href="/support"
-              className="transition hover:text-white"
-            >
-              Support
             </Link>
 
           </div>
