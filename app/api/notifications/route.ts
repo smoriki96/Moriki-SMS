@@ -1,23 +1,19 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL;
-
-const SUPABASE_PUBLISHABLE_KEY =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  process.env.NEXT_PUBLIC_SUPABASE_URL!;
 
 const SUPABASE_SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 function jsonResponse(
-  data: Record<string, unknown>,
+  data: unknown,
   status = 200
 ) {
   return NextResponse.json(data, {
     status,
     headers: {
-      "Content-Type": "application/json",
       "Cache-Control":
         "no-store, no-cache, must-revalidate, proxy-revalidate",
       Pragma: "no-cache",
@@ -26,20 +22,16 @@ function jsonResponse(
   });
 }
 
-export async function GET(
-  request: NextRequest
-) {
+export async function GET(request: Request) {
   try {
     if (
       !SUPABASE_URL ||
-      !SUPABASE_PUBLISHABLE_KEY ||
       !SUPABASE_SERVICE_ROLE_KEY
     ) {
       return jsonResponse(
         {
-          success: false,
           error:
-            "Server configuration is incomplete.",
+            "Supabase server environment variables are missing.",
         },
         500
       );
@@ -54,7 +46,6 @@ export async function GET(
     ) {
       return jsonResponse(
         {
-          success: false,
           error: "Unauthorized.",
         },
         401
@@ -62,279 +53,195 @@ export async function GET(
     }
 
     const accessToken =
-      authorization
-        .substring("Bearer ".length)
-        .trim();
+      authorization.substring(7);
 
-    if (!accessToken) {
-      return jsonResponse(
+    const supabaseAdmin =
+      createClient(
+        SUPABASE_URL,
+        SUPABASE_SERVICE_ROLE_KEY,
         {
-          success: false,
-          error: "Unauthorized.",
-        },
-        401
-      );
-    }
-
-    /*
-     * Validate the customer session.
-     */
-    const authClient = createClient(
-      SUPABASE_URL,
-      SUPABASE_PUBLISHABLE_KEY,
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false,
-        },
-        global: {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
+          auth: {
+            autoRefreshToken: false,
+            persistSession: false,
           },
-        },
-      }
-    );
+        }
+      );
 
     const {
-      data: { user },
-      error: userError,
+      data: authData,
+      error: authError,
     } =
-      await authClient.auth.getUser(
+      await supabaseAdmin.auth.getUser(
         accessToken
       );
 
-    if (userError || !user) {
+    if (
+      authError ||
+      !authData.user
+    ) {
       return jsonResponse(
         {
-          success: false,
-          error:
-            "Your login session is invalid or expired.",
+          error: "Invalid authentication.",
         },
         401
       );
     }
 
-    /*
-     * Server-side service-role client.
-     */
-    const adminClient = createClient(
-      SUPABASE_URL,
-      SUPABASE_SERVICE_ROLE_KEY,
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false,
-        },
-      }
-    );
+    const userId =
+      authData.user.id;
 
-    /*
-     * Get global notifications separately.
-     */
     const {
       data: globalNotifications,
       error: globalError,
-    } = await adminClient
-      .from("notifications")
-      .select(
-        "id,user_id,title,message,type,created_at"
-      )
-      .is("user_id", null)
-      .order("created_at", {
-        ascending: false,
-      })
-      .limit(50);
+    } =
+      await supabaseAdmin
+        .from("notifications")
+        .select("*")
+        .eq("is_active", true)
+        .is("user_id", null)
+        .order("created_at", {
+          ascending: false,
+        })
+        .limit(1);
 
     if (globalError) {
       console.error(
-        "GLOBAL NOTIFICATIONS ERROR:",
+        "GLOBAL NOTIFICATION ERROR:",
         globalError
       );
 
       return jsonResponse(
         {
-          success: false,
           error:
-            "Could not load global notifications.",
-          details: globalError.message,
+            "Could not load notifications.",
         },
         500
       );
     }
 
-    /*
-     * Get notifications specifically for this user.
-     */
     const {
       data: personalNotifications,
       error: personalError,
-    } = await adminClient
-      .from("notifications")
-      .select(
-        "id,user_id,title,message,type,created_at"
-      )
-      .eq("user_id", user.id)
-      .order("created_at", {
-        ascending: false,
-      })
-      .limit(50);
+    } =
+      await supabaseAdmin
+        .from("notifications")
+        .select("*")
+        .eq("is_active", true)
+        .eq("user_id", userId)
+        .order("created_at", {
+          ascending: false,
+        })
+        .limit(1);
 
     if (personalError) {
       console.error(
-        "PERSONAL NOTIFICATIONS ERROR:",
+        "PERSONAL NOTIFICATION ERROR:",
         personalError
       );
 
       return jsonResponse(
         {
-          success: false,
           error:
-            "Could not load personal notifications.",
-          details: personalError.message,
+            "Could not load notifications.",
         },
         500
       );
     }
 
-    const allNotifications = [
+    const candidates = [
       ...(globalNotifications || []),
       ...(personalNotifications || []),
     ];
 
-    /*
-     * Remove duplicates and sort newest first.
-     */
-    const uniqueNotifications = Array.from(
-      new Map(
-        allNotifications.map((notification) => [
-          notification.id,
-          notification,
-        ])
-      ).values()
-    ).sort(
-      (a, b) =>
-        new Date(
-          String(b.created_at)
-        ).getTime() -
-        new Date(
-          String(a.created_at)
-        ).getTime()
+    candidates.sort(
+      (a: any, b: any) =>
+        new Date(b.created_at).getTime() -
+        new Date(a.created_at).getTime()
     );
 
-    if (uniqueNotifications.length === 0) {
+    const latest =
+      candidates.length > 0
+        ? candidates[0]
+        : null;
+
+    if (!latest) {
       return jsonResponse({
-        success: true,
         notifications: [],
       });
     }
 
-    /*
-     * Find notifications already shown to this user.
-     */
-    const notificationIds =
-      uniqueNotifications.map(
-        (notification) => notification.id
-      );
-
     const {
-      data: existingViews,
-      error: viewsError,
-    } = await adminClient
-      .from("notification_views")
-      .select("notification_id")
-      .eq("user_id", user.id)
-      .in(
-        "notification_id",
-        notificationIds
-      );
+      data: view,
+      error: viewError,
+    } =
+      await supabaseAdmin
+        .from("notification_views")
+        .select("id")
+        .eq(
+          "notification_id",
+          latest.id
+        )
+        .eq("user_id", userId)
+        .maybeSingle();
 
-    if (viewsError) {
+    if (viewError) {
       console.error(
-        "NOTIFICATION VIEWS ERROR:",
-        viewsError
+        "NOTIFICATION VIEW ERROR:",
+        viewError
       );
 
       return jsonResponse(
         {
-          success: false,
           error:
-            "Could not check notification history.",
-          details: viewsError.message,
+            "Could not check notification status.",
         },
         500
       );
     }
 
-    const seenIds = new Set(
-      (existingViews || []).map(
-        (view) => view.notification_id
-      )
-    );
+    if (view) {
+      return jsonResponse({
+        notifications: [],
+      });
+    }
 
-    /*
-     * Only return notifications that this
-     * customer has not seen before.
-     */
-    const unseenNotifications =
-      uniqueNotifications.filter(
-        (notification) =>
-          !seenIds.has(notification.id)
-      );
-
-    /*
-     * Mark returned notifications as shown.
-     */
-    if (unseenNotifications.length > 0) {
-      const views =
-        unseenNotifications.map(
-          (notification) => ({
-            notification_id:
-              notification.id,
-            user_id: user.id,
-          })
-        );
-
-      const {
-        error: insertViewsError,
-      } = await adminClient
+    const {
+      error: insertViewError,
+    } =
+      await supabaseAdmin
         .from("notification_views")
-        .upsert(views, {
-          onConflict:
-            "notification_id,user_id",
-          ignoreDuplicates: true,
-        });
-
-      if (insertViewsError) {
-        console.error(
-          "NOTIFICATION VIEW INSERT ERROR:",
-          insertViewsError
+        .upsert(
+          {
+            notification_id:
+              latest.id,
+            user_id: userId,
+          },
+          {
+            onConflict:
+              "notification_id,user_id",
+          }
         );
 
-        /*
-         * We still return the notification.
-         * This means the customer can see it even
-         * if recording the view fails.
-         */
-      }
+    if (insertViewError) {
+      console.error(
+        "SAVE NOTIFICATION VIEW ERROR:",
+        insertViewError
+      );
     }
 
     return jsonResponse({
-      success: true,
-      notifications: unseenNotifications,
+      notifications: [latest],
     });
   } catch (error) {
     console.error(
-      "CUSTOMER NOTIFICATIONS API ERROR:",
+      "CUSTOMER NOTIFICATIONS ERROR:",
       error
     );
 
     return jsonResponse(
       {
-        success: false,
         error:
-          error instanceof Error
-            ? error.message
-            : "Unexpected server error.",
+          "Something went wrong while loading notifications.",
       },
       500
     );
