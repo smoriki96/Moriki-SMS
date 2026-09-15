@@ -295,8 +295,7 @@ export default function FundWalletPage() {
 
         <p className="description">
           Add money to your Moriki SMS wallet
-          using Paystack. You are currently
-          using Paystack Test Mode.
+          using Paystack. 
         </p>
 
         <label className="field-label">
@@ -338,9 +337,8 @@ export default function FundWalletPage() {
         )}
 
         <div className="note">
-          This is a test payment. Do not use
-          real card details or real money.
-        </div>
+  Secured by Paystack. Your transaction is safe and encrypted.
+</div>
       </div>
     </main>
   );
