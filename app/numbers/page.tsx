@@ -12,7 +12,7 @@ type Country = {
 
 type Product = {
   name: string;
-  category?: string | null;
+  category: string | null;
   quantity: number;
   priceUSD: number;
   basePriceNGN: number;
@@ -44,17 +44,16 @@ function pretty(value: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-/*
- * Never show raw provider errors to customers.
- * Detailed information is logged only in the browser console.
- */
 function friendlyError(
   action: "countries" | "services" | "search" | "purchase",
-  error?: unknown
+  error: unknown
 ) {
   console.error(`MORIKI ${action.toUpperCase()} ERROR:`, error);
 
-  if (error instanceof DOMException && error.name === "AbortError") {
+  if (
+    error instanceof DOMException &&
+    error.name === "AbortError"
+  ) {
     return "The request took too long. Please try again.";
   }
 
@@ -111,10 +110,6 @@ async function fetchJson(
     }
 
     if (!response.ok || !data?.success) {
-      /*
-       * Log the real server response internally,
-       * but do not expose it to the customer.
-       */
       console.error("MORIKI API FAILURE:", {
         url,
         status: response.status,
@@ -133,17 +128,30 @@ async function fetchJson(
 export default function NumbersPage() {
   const router = useRouter();
 
-  const [countries, setCountries] = useState<Country[]>([]);
+  const [countries, setCountries] =
+    useState<Country[]>([]);
 
   const [country, setCountry] = useState("");
   const [operator, setOperator] = useState("");
   const [service, setService] = useState("");
 
-  const [countrySearch, setCountrySearch] = useState("");
-  const [serviceSearch, setServiceSearch] = useState("");
+  const [countrySearch, setCountrySearch] =
+    useState("");
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [serviceSearch, setServiceSearch] =
+    useState("");
+
+  const [countryOpen, setCountryOpen] =
+    useState(false);
+
+  const [serviceOpen, setServiceOpen] =
+    useState(false);
+
+  const [products, setProducts] =
+    useState<Product[]>([]);
+
+  const [results, setResults] =
+    useState<SearchResult[]>([]);
 
   const [loadingCountries, setLoadingCountries] =
     useState(true);
@@ -157,16 +165,11 @@ export default function NumbersPage() {
   const [buying, setBuying] =
     useState(false);
 
-  const [error, setError] =
-    useState("");
-
-  const [message, setMessage] =
-    useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
   /*
-   * ========================================
    * LOAD COUNTRIES
-   * ========================================
    */
   useEffect(() => {
     let cancelled = false;
@@ -182,17 +185,20 @@ export default function NumbersPage() {
 
         if (cancelled) return;
 
-        const incoming = Array.isArray(data?.countries)
+        const incoming = Array.isArray(
+          data.countries
+        )
           ? data.countries
           : [];
 
-        const uniqueMap = new Map<string, Country>();
+        const uniqueMap =
+          new Map<string, Country>();
 
         incoming.forEach((item: any) => {
           const realKey =
-            item?.key ||
-            item?.code ||
-            item?.country;
+            item.key ||
+            item.code ||
+            item.country;
 
           if (
             typeof realKey !== "string" ||
@@ -206,20 +212,24 @@ export default function NumbersPage() {
             .toLowerCase();
 
           const name =
-            item?.name ||
-            item?.text_en ||
+            item.name ||
+            item.text_en ||
             pretty(key);
 
           let operators: string[] = [];
 
-          if (Array.isArray(item?.operators)) {
+          if (
+            Array.isArray(item.operators)
+          ) {
             operators = item.operators
-              .map((value: any) => String(value))
+              .map((value: any) =>
+                String(value)
+              )
               .filter(Boolean);
           }
 
           /*
-           * Some provider responses expose
+           * Some 5SIM responses expose
            * operators as object keys.
            */
           if (
@@ -242,7 +252,8 @@ export default function NumbersPage() {
               (operatorName) =>
                 !ignoredKeys.has(operatorName) &&
                 item[operatorName] &&
-                typeof item[operatorName] === "object"
+                typeof item[operatorName] ===
+                  "object"
             );
           }
 
@@ -272,6 +283,7 @@ export default function NumbersPage() {
         if (cancelled) return;
 
         setCountries([]);
+
         setError(
           friendlyError("countries", err)
         );
@@ -290,13 +302,12 @@ export default function NumbersPage() {
   }, []);
 
   /*
-   * ========================================
    * FILTER COUNTRIES
-   * ========================================
    */
   const filteredCountries = useMemo(() => {
-    const query =
-      countrySearch.trim().toLowerCase();
+    const query = countrySearch
+      .trim()
+      .toLowerCase();
 
     if (!query) {
       return countries;
@@ -310,9 +321,76 @@ export default function NumbersPage() {
   }, [countries, countrySearch]);
 
   /*
-   * ========================================
+   * COUNTRY SEARCH
+   */
+  function handleCountrySearch(
+    value: string
+  ) {
+    setCountrySearch(value);
+    setCountryOpen(true);
+    setError("");
+    setMessage("");
+
+    const query = value
+      .trim()
+      .toLowerCase();
+
+    if (!query) {
+      setCountry("");
+      return;
+    }
+
+    const exact = countries.find(
+      (item) =>
+        item.name
+          .trim()
+          .toLowerCase() === query ||
+        item.key
+          .trim()
+          .toLowerCase() === query
+    );
+
+    if (exact) {
+      setCountry(exact.key);
+      setCountrySearch(exact.name);
+      setCountryOpen(false);
+      return;
+    }
+
+    const matches = countries.filter(
+      (item) =>
+        `${item.name} ${item.key}`
+          .toLowerCase()
+          .includes(query)
+    );
+
+    if (matches.length === 1) {
+      setCountry(matches[0].key);
+      setCountrySearch(matches[0].name);
+      setCountryOpen(false);
+    }
+  }
+
+  /*
+   * SELECT COUNTRY
+   */
+  function selectCountry(item: Country) {
+    setCountry(item.key);
+    setCountrySearch(item.name);
+    setCountryOpen(false);
+
+    setOperator("");
+    setService("");
+    setServiceSearch("");
+    setProducts([]);
+    setResults([]);
+
+    setError("");
+    setMessage("");
+  }
+
+  /*
    * SELECTED COUNTRY
-   * ========================================
    */
   const selectedCountry = useMemo(() => {
     return countries.find(
@@ -331,23 +409,7 @@ export default function NumbersPage() {
   }, [selectedCountry]);
 
   /*
-   * ========================================
-   * COUNTRY CHANGED
-   * ========================================
-   */
-  useEffect(() => {
-    setOperator("");
-    setService("");
-    setProducts([]);
-    setResults([]);
-    setServiceSearch("");
-    setMessage("");
-  }, [country]);
-
-  /*
-   * ========================================
    * LOAD SERVICES
-   * ========================================
    */
   useEffect(() => {
     if (!country) {
@@ -369,7 +431,9 @@ export default function NumbersPage() {
 
         const url =
           `/api/5sim?action=products` +
-          `&country=${encodeURIComponent(country)}` +
+          `&country=${encodeURIComponent(
+            country
+          )}` +
           `&operator=${encodeURIComponent(
             selectedOperator
           )}`;
@@ -387,7 +451,7 @@ export default function NumbersPage() {
         if (cancelled) return;
 
         const incoming =
-          Array.isArray(data?.products)
+          Array.isArray(data.products)
             ? data.products
             : [];
 
@@ -396,8 +460,8 @@ export default function NumbersPage() {
 
         incoming.forEach((item: any) => {
           const name = String(
-            item?.product ||
-              item?.name ||
+            item.product ||
+              item.name ||
               ""
           ).trim();
 
@@ -410,47 +474,50 @@ export default function NumbersPage() {
               name,
 
               category:
-                item?.category ||
-                item?.Category ||
+                item.category ||
+                item.Category ||
                 null,
 
               quantity: Number(
-                item?.quantity ||
-                  item?.Qty ||
+                item.quantity ||
+                  item.Qty ||
                   0
               ),
 
               priceUSD: Number(
-                item?.priceUSD ||
-                  item?.Price ||
+                item.priceUSD ||
+                  item.Price ||
                   0
               ),
 
               basePriceNGN: Number(
-                item?.basePriceNGN || 0
+                item.basePriceNGN || 0
               ),
 
               profitNGN: Number(
-                item?.profitNGN || 0
+                item.profitNGN || 0
               ),
 
               priceNGN: Number(
-                item?.priceNGN || 0
+                item.priceNGN || 0
               ),
             });
           }
         });
 
-        const unique =
-          Array.from(
-            productMap.values()
-          ).sort((a, b) =>
-            a.name.localeCompare(b.name)
-          );
+        const unique = Array.from(
+          productMap.values()
+        ).sort((a, b) =>
+          a.name.localeCompare(b.name)
+        );
 
         setProducts(unique);
 
-        if (!operator && data?.operator) {
+        /*
+         * If API gives us an operator
+         * automatically, use it.
+         */
+        if (!operator && data.operator) {
           setOperator(
             String(data.operator)
           );
@@ -459,6 +526,7 @@ export default function NumbersPage() {
         if (cancelled) return;
 
         setProducts([]);
+
         setError(
           friendlyError("services", err)
         );
@@ -477,13 +545,12 @@ export default function NumbersPage() {
   }, [country, operator]);
 
   /*
-   * ========================================
    * FILTER SERVICES
-   * ========================================
    */
   const filteredProducts = useMemo(() => {
-    const query =
-      serviceSearch.trim().toLowerCase();
+    const query = serviceSearch
+      .trim()
+      .toLowerCase();
 
     if (!query) {
       return products;
@@ -497,9 +564,78 @@ export default function NumbersPage() {
   }, [products, serviceSearch]);
 
   /*
-   * ========================================
+   * SERVICE SEARCH
+   */
+  function handleServiceSearch(
+    value: string
+  ) {
+    setServiceSearch(value);
+    setServiceOpen(true);
+    setError("");
+    setMessage("");
+
+    const query = value
+      .trim()
+      .toLowerCase();
+
+    if (!query) {
+      setService("");
+      return;
+    }
+
+    const exact = products.find(
+      (item) =>
+        item.name
+          .trim()
+          .toLowerCase() === query ||
+        String(item.category || "")
+          .trim()
+          .toLowerCase() === query
+    );
+
+    if (exact) {
+      setService(exact.name);
+      setServiceSearch(
+        pretty(exact.name)
+      );
+      setServiceOpen(false);
+      return;
+    }
+
+    const matches = products.filter(
+      (item) =>
+        `${item.name} ${
+          item.category || ""
+        }`
+          .toLowerCase()
+          .includes(query)
+    );
+
+    if (matches.length === 1) {
+      setService(matches[0].name);
+      setServiceSearch(
+        pretty(matches[0].name)
+      );
+      setServiceOpen(false);
+    }
+  }
+
+  /*
+   * SELECT SERVICE
+   */
+  function selectService(item: Product) {
+    setService(item.name);
+    setServiceSearch(
+      pretty(item.name)
+    );
+    setServiceOpen(false);
+
+    setError("");
+    setMessage("");
+  }
+
+  /*
    * SEARCH NUMBERS
-   * ========================================
    */
   async function searchNumbers() {
     if (!country) {
@@ -525,9 +661,15 @@ export default function NumbersPage() {
 
       const url =
         `/api/5sim?action=search` +
-        `&country=${encodeURIComponent(country)}` +
-        `&operator=${encodeURIComponent(operator)}` +
-        `&product=${encodeURIComponent(service)}`;
+        `&country=${encodeURIComponent(
+          country
+        )}` +
+        `&operator=${encodeURIComponent(
+          operator
+        )}` +
+        `&product=${encodeURIComponent(
+          service
+        )}`;
 
       console.log(
         "MORIKI: Searching numbers",
@@ -542,35 +684,35 @@ export default function NumbersPage() {
 
       const found: SearchResult = {
         country: String(
-          data?.country || country
+          data.country || country
         ),
 
         operator: String(
-          data?.operator || operator
+          data.operator || operator
         ),
 
         service: String(
-          data?.product || service
+          data.product || service
         ),
 
         quantity: Number(
-          data?.quantity || 0
+          data.quantity || 0
         ),
 
         priceUSD: Number(
-          data?.priceUSD || 0
+          data.priceUSD || 0
         ),
 
         basePriceNGN: Number(
-          data?.basePriceNGN || 0
+          data.basePriceNGN || 0
         ),
 
         profitNGN: Number(
-          data?.profitNGN || 0
+          data.profitNGN || 0
         ),
 
         priceNGN: Number(
-          data?.priceNGN || 0
+          data.priceNGN || 0
         ),
 
         currency: "NGN",
@@ -594,11 +736,7 @@ export default function NumbersPage() {
   }
 
   /*
-   * ========================================
    * BUY NUMBER
-   * ========================================
-   *
-   * Existing purchase flow preserved.
    */
   async function buyNumber(
     item: SearchResult
@@ -662,7 +800,7 @@ export default function NumbersPage() {
       });
 
       const activationData =
-        data?.data || data;
+        data.data || data;
 
       try {
         sessionStorage.setItem(
@@ -673,15 +811,15 @@ export default function NumbersPage() {
         );
       } catch (storageError) {
         console.error(
-          "MORIKI SESSION STORAGE ERROR:",
+          "MORIKI STORAGE ERROR:",
           storageError
         );
       }
 
       const orderId =
-        data?.orderId ||
-        activationData?.orderId ||
-        activationData?.order_id;
+        data.orderId ||
+        activationData.orderId ||
+        activationData.order_id;
 
       if (orderId) {
         router.push(
@@ -693,10 +831,6 @@ export default function NumbersPage() {
         router.push("/activation");
       }
     } catch (err) {
-      /*
-       * Real provider error stays in console.
-       * Customer gets only a friendly message.
-       */
       setError(
         friendlyError("purchase", err)
       );
@@ -876,7 +1010,7 @@ export default function NumbersPage() {
           justify-content: center;
           box-shadow:
             0 0 60px
-              rgba(14, 165, 233, 0.55);
+            rgba(14, 165, 233, 0.55);
           transform: rotate(-8deg);
         }
 
@@ -885,10 +1019,6 @@ export default function NumbersPage() {
           height: 65px;
           border-radius: 50%;
           background: #2196f3;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 28px;
         }
 
         .search-card {
@@ -899,7 +1029,7 @@ export default function NumbersPage() {
             rgba(148, 163, 184, 0.14);
           box-shadow:
             0 25px 70px
-              rgba(0, 0, 0, 0.3);
+            rgba(0, 0, 0, 0.3);
         }
 
         .search-grid {
@@ -922,13 +1052,12 @@ export default function NumbersPage() {
 
         .search-input {
           width: 100%;
-          height: 48px;
-          border-radius: 12px;
+          height: 54px;
+          border-radius: 14px;
           border: 1px solid #334155;
           background: #020617;
           color: white;
           padding: 0 14px;
-          margin-bottom: 8px;
           outline: none;
         }
 
@@ -936,7 +1065,7 @@ export default function NumbersPage() {
           border-color: #2196f3;
           box-shadow:
             0 0 0 3px
-              rgba(33, 150, 243, 0.12);
+            rgba(33, 150, 243, 0.12);
         }
 
         .search-input::placeholder {
@@ -956,16 +1085,73 @@ export default function NumbersPage() {
           cursor: pointer;
         }
 
-        .field select:focus {
-          border-color: #2196f3;
-          box-shadow:
-            0 0 0 3px
-              rgba(33, 150, 243, 0.12);
-        }
-
         .field select:disabled {
           opacity: 0.55;
           cursor: not-allowed;
+        }
+
+        .combo {
+          position: relative;
+          width: 100%;
+        }
+
+        .dropdown {
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: calc(100% + 7px);
+          max-height: 300px;
+          overflow-y: auto;
+          z-index: 100;
+          border: 1px solid #334155;
+          border-radius: 14px;
+          background: #020617;
+          box-shadow:
+            0 20px 50px
+            rgba(0, 0, 0, 0.45);
+        }
+
+        .dropdown-item {
+          width: 100%;
+          min-height: 52px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 14px;
+          border: 0;
+          border-bottom: 1px solid
+            rgba(148, 163, 184, 0.08);
+          background: transparent;
+          color: white;
+          padding: 12px 15px;
+          text-align: left;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 700;
+        }
+
+        .dropdown-item:last-child {
+          border-bottom: 0;
+        }
+
+        .dropdown-item:hover,
+        .dropdown-item-active {
+          background: rgba(33, 150, 243, 0.14);
+          color: #38bdf8;
+        }
+
+        .dropdown-item small {
+          color: #64748b;
+          font-size: 11px;
+          font-weight: 800;
+          text-transform: uppercase;
+        }
+
+        .dropdown-empty {
+          padding: 18px 15px;
+          color: #64748b;
+          font-size: 13px;
+          text-align: center;
         }
 
         .search-button {
@@ -1293,9 +1479,7 @@ export default function NumbersPage() {
 
               <h1>
                 Browse{" "}
-                <span>
-                  Numbers.
-                </span>
+                <span>Numbers.</span>
               </h1>
 
               <p>
@@ -1311,63 +1495,84 @@ export default function NumbersPage() {
 
             <div className="visual">
               <div className="visual-phone">
-                <div className="visual-phone-inner">
-                  ?
-                </div>
+                <div className="visual-phone-inner" />
               </div>
             </div>
           </section>
 
           <section className="search-card">
             <div className="search-grid">
-
               <div className="field">
                 <label>
-                  ?? Country search
+                  Country
                 </label>
 
-                <input
-                  className="search-input"
-                  value={countrySearch}
-                  onChange={(e) =>
-                    setCountrySearch(
-                      e.target.value
-                    )
-                  }
-                  placeholder="Search country..."
-                  disabled={
-                    loadingCountries
-                  }
-                />
+                <div className="combo">
+                  <input
+                    className="search-input"
+                    value={countrySearch}
+                    onChange={(e) =>
+                      handleCountrySearch(
+                        e.target.value
+                      )
+                    }
+                    onFocus={() =>
+                      setCountryOpen(true)
+                    }
+                    placeholder={
+                      loadingCountries
+                        ? "Loading countries..."
+                        : "Search country..."
+                    }
+                    disabled={
+                      loadingCountries
+                    }
+                    autoComplete="off"
+                  />
 
-                <select
-                  value={country}
-                  onChange={(e) =>
-                    setCountry(
-                      e.target.value
-                    )
-                  }
-                  disabled={
-                    loadingCountries
-                  }
-                >
-                  <option value="">
-                    {loadingCountries
-                      ? "Loading countries..."
-                      : "Select country"}
-                  </option>
+                  {countryOpen &&
+                    !loadingCountries && (
+                      <div className="dropdown">
+                        {filteredCountries.length >
+                        0 ? (
+                          filteredCountries
+                            .slice(0, 12)
+                            .map((item) => (
+                              <button
+                                type="button"
+                                key={item.key}
+                                className={`dropdown-item ${
+                                  item.key ===
+                                  country
+                                    ? "dropdown-item-active"
+                                    : ""
+                                }`}
+                                onMouseDown={(e) =>
+                                  e.preventDefault()
+                                }
+                                onClick={() =>
+                                  selectCountry(
+                                    item
+                                  )
+                                }
+                              >
+                                <span>
+                                  {item.name}
+                                </span>
 
-                  {filteredCountries.map(
-                    (item) => (
-                      <option
-                        key={item.key}
-                        value={item.key}
-                      >
-                        {item.name}
-                      </option>
-                    )
-                  )}
-                </select>
+                                <small>
+                                  {item.key.toUpperCase()}
+                                </small>
+                              </button>
+                            ))
+                        ) : (
+                          <div className="dropdown-empty">
+                            No countries found
+                          </div>
+                        )}
+                      </div>
+                    )}
+                </div>
               </div>
 
               <div className="field">
@@ -1391,89 +1596,118 @@ export default function NumbersPage() {
                     {!country
                       ? "Select country first"
                       : operators.length === 0
-                      ? "No operators available"
-                      : "Select operator"}
+                        ? "No operators available"
+                        : "Select operator"}
                   </option>
 
-                  {operators.map(
-                    (item) => (
-                      <option
-                        key={item}
-                        value={item}
-                      >
-                        {pretty(item)}
-                      </option>
-                    )
-                  )}
+                  {operators.map((item) => (
+                    <option
+                      key={item}
+                      value={item}
+                    >
+                      {pretty(item)}
+                    </option>
+                  ))}
                 </select>
               </div>
 
               <div className="field">
                 <label>
-                  ?? Service search
+                  Service
                 </label>
 
-                <input
-                  className="search-input"
-                  value={serviceSearch}
-                  onChange={(e) =>
-                    setServiceSearch(
-                      e.target.value
-                    )
-                  }
-                  placeholder="Search service..."
-                  disabled={
-                    !country ||
-                    !operator ||
-                    loadingProducts
-                  }
-                />
+                <div className="combo">
+                  <input
+                    className="search-input"
+                    value={serviceSearch}
+                    onChange={(e) =>
+                      handleServiceSearch(
+                        e.target.value
+                      )
+                    }
+                    onFocus={() => {
+                      if (
+                        country &&
+                        operator &&
+                        !loadingProducts
+                      ) {
+                        setServiceOpen(true);
+                      }
+                    }}
+                    placeholder={
+                      !country
+                        ? "Select country first"
+                        : !operator
+                          ? "Select operator first"
+                          : loadingProducts
+                            ? "Loading services..."
+                            : "Search service..."
+                    }
+                    disabled={
+                      !country ||
+                      !operator ||
+                      loadingProducts
+                    }
+                    autoComplete="off"
+                  />
 
-                <select
-                  value={service}
-                  onChange={(e) =>
-                    setService(
-                      e.target.value
-                    )
-                  }
-                  disabled={
-                    !country ||
-                    !operator ||
-                    loadingProducts ||
-                    filteredProducts.length === 0
-                  }
-                >
-                  <option value="">
-                    {!country
-                      ? "Select country first"
-                      : !operator
-                      ? "Select operator first"
-                      : loadingProducts
-                      ? "Loading services..."
-                      : filteredProducts.length === 0
-                      ? "No matching services"
-                      : "Select service"}
-                  </option>
+                  {serviceOpen &&
+                    country &&
+                    operator &&
+                    !loadingProducts && (
+                      <div className="dropdown">
+                        {filteredProducts.length >
+                        0 ? (
+                          filteredProducts
+                            .slice(0, 12)
+                            .map((item) => (
+                              <button
+                                type="button"
+                                key={item.name}
+                                className={`dropdown-item ${
+                                  item.name ===
+                                  service
+                                    ? "dropdown-item-active"
+                                    : ""
+                                }`}
+                                onMouseDown={(e) =>
+                                  e.preventDefault()
+                                }
+                                onClick={() =>
+                                  selectService(
+                                    item
+                                  )
+                                }
+                              >
+                                <span>
+                                  {pretty(
+                                    item.name
+                                  )}
+                                </span>
 
-                  {filteredProducts.map(
-                    (item) => (
-                      <option
-                        key={item.name}
-                        value={item.name}
-                      >
-                        {pretty(item.name)}
-                      </option>
-                    )
-                  )}
-                </select>
+                                {item.category && (
+                                  <small>
+                                    {pretty(
+                                      item.category
+                                    )}
+                                  </small>
+                                )}
+                              </button>
+                            ))
+                        ) : (
+                          <div className="dropdown-empty">
+                            No matching services
+                          </div>
+                        )}
+                      </div>
+                    )}
+                </div>
               </div>
 
               <button
                 type="button"
                 className="search-button"
-                onClick={
-                  searchNumbers
-                }
+                onClick={searchNumbers}
                 disabled={
                   searching ||
                   !country ||
@@ -1503,7 +1737,6 @@ export default function NumbersPage() {
           {selectedProduct && (
             <section className="service-card">
               <div className="service-grid">
-
                 <div>
                   <div className="service-label">
                     Service
@@ -1537,7 +1770,6 @@ export default function NumbersPage() {
                     )}
                   </div>
                 </div>
-
               </div>
             </section>
           )}
@@ -1555,10 +1787,9 @@ export default function NumbersPage() {
                     key={`${item.country}-${item.operator}-${item.service}-${index}`}
                   >
                     <div className="result-row">
-
                       <div>
                         <div className="available">
-                          ? Available
+                          Available
                         </div>
 
                         <div className="result-name">
@@ -1568,16 +1799,13 @@ export default function NumbersPage() {
                         </div>
 
                         <div className="badges">
-
                           <span className="badge">
-                            ??{" "}
                             {pretty(
                               item.country
                             )}
                           </span>
 
                           <span className="badge">
-                            ??{" "}
                             {pretty(
                               item.operator
                             )}
@@ -1589,12 +1817,10 @@ export default function NumbersPage() {
                             ).toLocaleString()}{" "}
                             available
                           </span>
-
                         </div>
                       </div>
 
                       <div className="result-right">
-
                         <div>
                           <div className="customer-label">
                             Customer Price
@@ -1619,7 +1845,6 @@ export default function NumbersPage() {
                             ? "Processing..."
                             : "Buy Number"}
                         </button>
-
                       </div>
                     </div>
                   </div>
@@ -1630,7 +1855,7 @@ export default function NumbersPage() {
             <section className="empty">
               <div>
                 <div className="empty-icon">
-                  ??
+                  #
                 </div>
 
                 <div className="empty-title">
@@ -1639,12 +1864,13 @@ export default function NumbersPage() {
 
                 <div className="empty-text">
                   Search for a country and
-                  service, select an operator,
-                  then press{" "}
+                  service, select an
+                  operator, then press{" "}
                   <strong>
                     Search Numbers
                   </strong>{" "}
-                  to check live availability.
+                  to check live
+                  availability.
                 </div>
               </div>
             </section>
