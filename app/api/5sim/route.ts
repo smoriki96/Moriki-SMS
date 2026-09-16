@@ -663,11 +663,61 @@ export async function GET(
           )}`
         );
 
+      const providerStatus =
+        String(result?.status || "")
+          .trim()
+          .toLowerCase();
+
+      const sms =
+        Array.isArray(result?.sms)
+          ? result.sms
+          : [];
+
+      const normalizedStatus =
+        sms.length > 0 ||
+        providerStatus === "received" ||
+        providerStatus === "finished"
+          ? "COMPLETED"
+          : providerStatus === "canceled" ||
+            providerStatus === "cancelled" ||
+            providerStatus === "timeout" ||
+            providerStatus === "expired"
+          ? "CANCELLED"
+          : "PENDING";
+
+      const { error: updateError } =
+        await supabaseAdmin
+          .from("orders")
+          .update({
+            order_status: normalizedStatus,
+            status: normalizedStatus,
+          })
+          .eq(
+            "fivesim_order_id",
+            String(orderId)
+          );
+
+      if (updateError) {
+        console.error(
+          "Unable to update activation status:",
+          updateError.message
+        );
+      }
+
       return successResponse({
         result,
+        status: normalizedStatus,
+        phone:
+          result?.phone ?? null,
+        country:
+          result?.country ?? null,
+        service:
+          result?.service ?? null,
+        sms,
+        fivesim_order_id:
+          result?.id ?? orderId,
       });
     }
-
     return safeErrorResponse(
       `Unknown 5SIM action: ${action}`,
       400
@@ -679,5 +729,3 @@ export async function GET(
     );
   }
 }
-
-

@@ -339,44 +339,32 @@ function ActivationContent() {
   const status =
     order?.status ||
     order?.order_status ||
-    "pending";
+    "PENDING";
 
   const normalizedStatus =
-    status.toLowerCase();
+    String(status).toLowerCase();
 
-  const isReceived =
+  const isCompleted =
     sms.length > 0 ||
-    normalizedStatus ===
-      "received";
-
-  const isFinished =
-    normalizedStatus ===
-    "finished";
+    normalizedStatus === "completed" ||
+    normalizedStatus === "received" ||
+    normalizedStatus === "finished";
 
   const isCanceled =
-    normalizedStatus ===
-      "canceled" ||
-    normalizedStatus ===
-      "cancelled";
+    normalizedStatus === "cancelled" ||
+    normalizedStatus === "canceled" ||
+    normalizedStatus === "timeout" ||
+    normalizedStatus === "expired";
 
   const statusText =
-    isReceived
-      ? "SMS Received"
-      : isFinished
-      ? "Completed"
+    isCompleted
+      ? "COMPLETED"
       : isCanceled
-      ? "Canceled"
-      : "Waiting for SMS";
+      ? "CANCELLED"
+      : "PENDING";
 
   const statusBadge =
-    isReceived
-      ? "Received"
-      : isFinished
-      ? "Finished"
-      : isCanceled
-      ? "Canceled"
-      : "Pending";
-
+    statusText;
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-950 text-white">
@@ -640,22 +628,22 @@ function ActivationContent() {
 
                   <span
                     className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${
-                      isReceived
+                      isCompleted
                         ? "bg-emerald-400/10 text-emerald-400"
                         : isCanceled
                         ? "bg-red-400/10 text-red-400"
-                        : isFinished
+                        : isCompleted
                         ? "bg-blue-400/10 text-blue-400"
                         : "bg-amber-400/10 text-amber-400"
                     }`}
                   >
                     <span
                       className={`h-1.5 w-1.5 rounded-full ${
-                        isReceived
+                        isCompleted
                           ? "bg-emerald-400"
                           : isCanceled
                           ? "bg-red-400"
-                          : isFinished
+                          : isCompleted
                           ? "bg-blue-400"
                           : "animate-pulse bg-amber-400"
                       }`}
@@ -870,5 +858,7 @@ export default function ActivationPage() {
     </Suspense>
   );
 }
+
+
 
 
