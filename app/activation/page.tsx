@@ -228,7 +228,10 @@ function ActivationContent() {
           );
         }
 
-        if (result.phone) {
+        const fiveSimResult =
+          result?.result ?? result;
+
+        if (fiveSimResult.phone) {
           setOrder(
             (previous) =>
               previous
@@ -254,12 +257,12 @@ function ActivationContent() {
         }
 
         if (
-          Array.isArray(result.sms)
+          Array.isArray(fiveSimResult.sms)
         ) {
-          setSms(result.sms);
+          setSms(fiveSimResult.sms);
         }
 
-        if (result.status) {
+        if (fiveSimResult.status) {
           const smsReceived =
             Array.isArray(
               result.sms
@@ -269,7 +272,7 @@ function ActivationContent() {
           setMessage(
             smsReceived
               ? "SMS received successfully."
-              : `Activation status: ${result.status}`
+              : `Activation status: ${fiveSimResult.status}`
           );
         }
       } catch (err) {
@@ -867,3 +870,5 @@ export default function ActivationPage() {
     </Suspense>
   );
 }
+
+

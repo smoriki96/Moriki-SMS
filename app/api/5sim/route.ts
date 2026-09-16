@@ -607,8 +607,8 @@ export async function GET(
 
       return successResponse({
         data: activation,
-        orderId:
-          activation?.id,
+        orderId: purchase?.id ?? purchase?.order_id ?? null,
+        fivesimOrderId: activation?.id,
         purchase,
         amount:
           customerPrice,
@@ -679,3 +679,5 @@ export async function GET(
     );
   }
 }
+
+
