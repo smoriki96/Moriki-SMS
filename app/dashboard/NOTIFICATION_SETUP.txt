@@ -1,0 +1,1 @@
+NEXT: Open notification_single_active.sql and run it in Supabase SQL Editor.
