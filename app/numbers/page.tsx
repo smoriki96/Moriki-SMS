@@ -33,8 +33,9 @@ type SearchResult = {
 };
 
 const REQUEST_TIMEOUT = 15000;
+
 function naira(value: number) {
-  return `₦${Number(value || 0).toLocaleString("en-NG")}`;
+  return `?${Number(value || 0).toLocaleString("en-NG")}`;
 }
 
 function pretty(value: string) {
@@ -127,42 +128,24 @@ async function fetchJson(
 export default function NumbersPage() {
   const router = useRouter();
 
-  const [countries, setCountries] =
-    useState<Country[]>([]);
-
+  const [countries, setCountries] = useState<Country[]>([]);
   const [country, setCountry] = useState("");
   const [operator, setOperator] = useState("");
   const [service, setService] = useState("");
 
-  const [countrySearch, setCountrySearch] =
-    useState("");
+  const [countrySearch, setCountrySearch] = useState("");
+  const [serviceSearch, setServiceSearch] = useState("");
 
-  const [serviceSearch, setServiceSearch] =
-    useState("");
+  const [countryOpen, setCountryOpen] = useState(false);
+  const [serviceOpen, setServiceOpen] = useState(false);
 
-  const [countryOpen, setCountryOpen] =
-    useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [results, setResults] = useState<SearchResult[]>([]);
 
-  const [serviceOpen, setServiceOpen] =
-    useState(false);
-
-  const [products, setProducts] =
-    useState<Product[]>([]);
-
-  const [results, setResults] =
-    useState<SearchResult[]>([]);
-
-  const [loadingCountries, setLoadingCountries] =
-    useState(true);
-
-  const [loadingProducts, setLoadingProducts] =
-    useState(false);
-
-  const [searching, setSearching] =
-    useState(false);
-
-  const [buying, setBuying] =
-    useState(false);
+  const [loadingCountries, setLoadingCountries] = useState(true);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [buying, setBuying] = useState(false);
 
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -184,14 +167,11 @@ export default function NumbersPage() {
 
         if (cancelled) return;
 
-        const incoming = Array.isArray(
-          data.countries
-        )
+        const incoming = Array.isArray(data.countries)
           ? data.countries
           : [];
 
-        const uniqueMap =
-          new Map<string, Country>();
+        const uniqueMap = new Map<string, Country>();
 
         incoming.forEach((item: any) => {
           const realKey =
@@ -217,20 +197,12 @@ export default function NumbersPage() {
 
           let operators: string[] = [];
 
-          if (
-            Array.isArray(item.operators)
-          ) {
+          if (Array.isArray(item.operators)) {
             operators = item.operators
-              .map((value: any) =>
-                String(value)
-              )
+              .map((value: any) => String(value))
               .filter(Boolean);
           }
 
-          /*
-           * Some 5SIM responses expose
-           * operators as object keys.
-           */
           if (
             operators.length === 0 &&
             item &&
@@ -251,8 +223,7 @@ export default function NumbersPage() {
               (operatorName) =>
                 !ignoredKeys.has(operatorName) &&
                 item[operatorName] &&
-                typeof item[operatorName] ===
-                  "object"
+                typeof item[operatorName] === "object"
             );
           }
 
@@ -282,7 +253,6 @@ export default function NumbersPage() {
         if (cancelled) return;
 
         setCountries([]);
-
         setError(
           friendlyError("countries", err)
         );
@@ -322,9 +292,7 @@ export default function NumbersPage() {
   /*
    * COUNTRY SEARCH
    */
-  function handleCountrySearch(
-    value: string
-  ) {
+  function handleCountrySearch(value: string) {
     setCountrySearch(value);
     setCountryOpen(true);
     setError("");
@@ -341,12 +309,8 @@ export default function NumbersPage() {
 
     const exact = countries.find(
       (item) =>
-        item.name
-          .trim()
-          .toLowerCase() === query ||
-        item.key
-          .trim()
-          .toLowerCase() === query
+        item.name.trim().toLowerCase() === query ||
+        item.key.trim().toLowerCase() === query
     );
 
     if (exact) {
@@ -356,11 +320,10 @@ export default function NumbersPage() {
       return;
     }
 
-    const matches = countries.filter(
-      (item) =>
-        `${item.name} ${item.key}`
-          .toLowerCase()
-          .includes(query)
+    const matches = countries.filter((item) =>
+      `${item.name} ${item.key}`
+        .toLowerCase()
+        .includes(query)
     );
 
     if (matches.length === 1) {
@@ -430,29 +393,18 @@ export default function NumbersPage() {
 
         const url =
           `/api/5sim?action=products` +
-          `&country=${encodeURIComponent(
-            country
-          )}` +
-          `&operator=${encodeURIComponent(
-            selectedOperator
-          )}`;
-
-        console.log(
-          "MORIKI: Loading products",
-          {
-            country,
-            operator: selectedOperator,
-          }
-        );
+          `&country=${encodeURIComponent(country)}` +
+          `&operator=${encodeURIComponent(selectedOperator)}`;
 
         const data = await fetchJson(url);
 
         if (cancelled) return;
 
-        const incoming =
-          Array.isArray(data.products)
-            ? data.products
-            : [];
+        const incoming = Array.isArray(
+          data.products
+        )
+          ? data.products
+          : [];
 
         const productMap =
           new Map<string, Product>();
@@ -471,32 +423,26 @@ export default function NumbersPage() {
           if (!productMap.has(name)) {
             productMap.set(name, {
               name,
-
               category:
                 item.category ||
                 item.Category ||
                 null,
-
               quantity: Number(
                 item.quantity ||
                   item.Qty ||
                   0
               ),
-
               priceUSD: Number(
                 item.priceUSD ||
                   item.Price ||
                   0
               ),
-
               basePriceNGN: Number(
                 item.basePriceNGN || 0
               ),
-
               profitNGN: Number(
                 item.profitNGN || 0
               ),
-
               priceNGN: Number(
                 item.priceNGN || 0
               ),
@@ -512,20 +458,13 @@ export default function NumbersPage() {
 
         setProducts(unique);
 
-        /*
-         * If API gives us an operator
-         * automatically, use it.
-         */
         if (!operator && data.operator) {
-          setOperator(
-            String(data.operator)
-          );
+          setOperator(String(data.operator));
         }
       } catch (err) {
         if (cancelled) return;
 
         setProducts([]);
-
         setError(
           friendlyError("services", err)
         );
@@ -565,9 +504,7 @@ export default function NumbersPage() {
   /*
    * SERVICE SEARCH
    */
-  function handleServiceSearch(
-    value: string
-  ) {
+  function handleServiceSearch(value: string) {
     setServiceSearch(value);
     setServiceOpen(true);
     setError("");
@@ -584,9 +521,7 @@ export default function NumbersPage() {
 
     const exact = products.find(
       (item) =>
-        item.name
-          .trim()
-          .toLowerCase() === query ||
+        item.name.trim().toLowerCase() === query ||
         String(item.category || "")
           .trim()
           .toLowerCase() === query
@@ -594,20 +529,15 @@ export default function NumbersPage() {
 
     if (exact) {
       setService(exact.name);
-      setServiceSearch(
-        pretty(exact.name)
-      );
+      setServiceSearch(pretty(exact.name));
       setServiceOpen(false);
       return;
     }
 
-    const matches = products.filter(
-      (item) =>
-        `${item.name} ${
-          item.category || ""
-        }`
-          .toLowerCase()
-          .includes(query)
+    const matches = products.filter((item) =>
+      `${item.name} ${item.category || ""}`
+        .toLowerCase()
+        .includes(query)
     );
 
     if (matches.length === 1) {
@@ -624,9 +554,7 @@ export default function NumbersPage() {
    */
   function selectService(item: Product) {
     setService(item.name);
-    setServiceSearch(
-      pretty(item.name)
-    );
+    setServiceSearch(pretty(item.name));
     setServiceOpen(false);
 
     setError("");
@@ -660,24 +588,9 @@ export default function NumbersPage() {
 
       const url =
         `/api/5sim?action=search` +
-        `&country=${encodeURIComponent(
-          country
-        )}` +
-        `&operator=${encodeURIComponent(
-          operator
-        )}` +
-        `&product=${encodeURIComponent(
-          service
-        )}`;
-
-      console.log(
-        "MORIKI: Searching numbers",
-        {
-          country,
-          operator,
-          service,
-        }
-      );
+        `&country=${encodeURIComponent(country)}` +
+        `&operator=${encodeURIComponent(operator)}` +
+        `&product=${encodeURIComponent(service)}`;
 
       const data = await fetchJson(url);
 
@@ -685,35 +598,27 @@ export default function NumbersPage() {
         country: String(
           data.country || country
         ),
-
         operator: String(
           data.operator || operator
         ),
-
         service: String(
           data.product || service
         ),
-
         quantity: Number(
           data.quantity || 0
         ),
-
         priceUSD: Number(
           data.priceUSD || 0
         ),
-
         basePriceNGN: Number(
           data.basePriceNGN || 0
         ),
-
         profitNGN: Number(
           data.profitNGN || 0
         ),
-
         priceNGN: Number(
           data.priceNGN || 0
         ),
-
         currency: "NGN",
       };
 
@@ -737,9 +642,7 @@ export default function NumbersPage() {
   /*
    * BUY NUMBER
    */
-  async function buyNumber(
-    item: SearchResult
-  ) {
+  async function buyNumber(item: SearchResult) {
     if (buying) {
       return;
     }
@@ -752,8 +655,7 @@ export default function NumbersPage() {
       const {
         data: { session },
         error: sessionError,
-      } =
-        await supabase.auth.getSession();
+      } = await supabase.auth.getSession();
 
       if (sessionError) {
         console.error(
@@ -771,24 +673,9 @@ export default function NumbersPage() {
 
       const url =
         `/api/5sim?action=buy` +
-        `&country=${encodeURIComponent(
-          item.country
-        )}` +
-        `&operator=${encodeURIComponent(
-          item.operator
-        )}` +
-        `&product=${encodeURIComponent(
-          item.service
-        )}`;
-
-      console.log(
-        "MORIKI: Starting number purchase",
-        {
-          country: item.country,
-          operator: item.operator,
-          product: item.service,
-        }
-      );
+        `&country=${encodeURIComponent(item.country)}` +
+        `&operator=${encodeURIComponent(item.operator)}` +
+        `&product=${encodeURIComponent(item.service)}`;
 
       const data = await fetchJson(url, {
         method: "GET",
@@ -804,9 +691,7 @@ export default function NumbersPage() {
       try {
         sessionStorage.setItem(
           "moriki_activation",
-          JSON.stringify(
-            activationData
-          )
+          JSON.stringify(activationData)
         );
       } catch (storageError) {
         console.error(
@@ -850,9 +735,14 @@ export default function NumbersPage() {
           box-sizing: border-box;
         }
 
+        html,
         body {
           margin: 0;
+          padding: 0;
           background: #020617;
+        }
+
+        body {
           color: white;
           font-family:
             Arial,
@@ -871,12 +761,12 @@ export default function NumbersPage() {
           background:
             radial-gradient(
               circle at 10% 10%,
-              rgba(14, 165, 233, 0.16),
-              transparent 32%
+              rgba(14, 165, 233, 0.12),
+              transparent 30%
             ),
             radial-gradient(
               circle at 90% 20%,
-              rgba(37, 99, 235, 0.18),
+              rgba(37, 99, 235, 0.14),
               transparent 30%
             ),
             linear-gradient(
@@ -888,22 +778,22 @@ export default function NumbersPage() {
         }
 
         .topbar {
-          height: 76px;
+          height: 64px;
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 6%;
+          padding: 0 5%;
           border-bottom: 1px solid
-            rgba(148, 163, 184, 0.14);
-          background: rgba(2, 6, 23, 0.88);
+            rgba(148, 163, 184, 0.12);
+          background: rgba(2, 6, 23, 0.92);
           backdrop-filter: blur(16px);
           position: sticky;
           top: 0;
-          z-index: 20;
+          z-index: 50;
         }
 
         .brand {
-          font-size: 25px;
+          font-size: 23px;
           font-weight: 900;
           letter-spacing: -1px;
         }
@@ -918,7 +808,7 @@ export default function NumbersPage() {
 
         .nav {
           display: flex;
-          gap: 28px;
+          gap: 20px;
           align-items: center;
         }
 
@@ -926,7 +816,7 @@ export default function NumbersPage() {
           color: #94a3b8;
           text-decoration: none;
           font-weight: 700;
-          font-size: 15px;
+          font-size: 13px;
         }
 
         .nav a:hover {
@@ -934,38 +824,61 @@ export default function NumbersPage() {
         }
 
         .page-container {
-          width: min(1200px, 92%);
+          width: min(1100px, 94%);
           margin: 0 auto;
-          padding: 70px 0 100px;
+          padding: 26px 0 60px;
+        }
+
+        .security-warning {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 14px;
+          padding: 10px 13px;
+          border: 1px solid
+            rgba(250, 204, 21, 0.22);
+          border-radius: 12px;
+          background: rgba(120, 80, 0, 0.16);
+          color: #fde68a;
+          font-size: 12px;
+          line-height: 1.4;
+        }
+
+        .security-warning strong {
+          color: #fef3c7;
+        }
+
+        .warning-icon {
+          flex: 0 0 auto;
+          width: 24px;
+          height: 24px;
+          border-radius: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(250, 204, 21, 0.15);
+          font-size: 13px;
+        }
+
+        .hero {
+          margin-bottom: 16px;
+          padding: 8px 2px 4px;
         }
 
         .eyebrow {
           color: #38bdf8;
-          font-size: 13px;
+          font-size: 10px;
           font-weight: 900;
-          letter-spacing: 3px;
+          letter-spacing: 2px;
           text-transform: uppercase;
-          margin-bottom: 15px;
-        }
-
-        .hero {
-          display: grid;
-          grid-template-columns:
-            1.35fr 0.65fr;
-          gap: 45px;
-          align-items: center;
-          margin-bottom: 50px;
+          margin-bottom: 5px;
         }
 
         .hero h1 {
           margin: 0;
-          font-size: clamp(
-            44px,
-            6vw,
-            72px
-          );
-          line-height: 0.98;
-          letter-spacing: -3px;
+          font-size: clamp(30px, 5vw, 46px);
+          line-height: 1;
+          letter-spacing: -2px;
         }
 
         .hero h1 span {
@@ -973,97 +886,60 @@ export default function NumbersPage() {
         }
 
         .hero p {
-          color: #94a3b8;
-          font-size: 18px;
-          line-height: 1.7;
-          max-width: 680px;
-          margin-top: 22px;
-        }
-
-        .visual {
-          min-height: 250px;
-          border-radius: 30px;
-          border: 1px solid
-            rgba(56, 189, 248, 0.25);
-          background:
-            radial-gradient(
-              circle at 50% 40%,
-              rgba(14, 165, 233, 0.3),
-              transparent 42%
-            ),
-            rgba(15, 23, 42, 0.8);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          position: relative;
-          overflow: hidden;
-        }
-
-        .visual-phone {
-          width: 115px;
-          height: 190px;
-          border: 5px solid #38bdf8;
-          border-radius: 25px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          box-shadow:
-            0 0 60px
-            rgba(14, 165, 233, 0.55);
-          transform: rotate(-8deg);
-        }
-
-        .visual-phone-inner {
-          width: 65px;
-          height: 65px;
-          border-radius: 50%;
-          background: #2196f3;
+          color: #64748b;
+          font-size: 13px;
+          line-height: 1.4;
+          max-width: 600px;
+          margin: 8px 0 0;
         }
 
         .search-card {
-          border-radius: 28px;
-          padding: 30px;
-          background: rgba(15, 23, 42, 0.86);
+          border-radius: 18px;
+          padding: 16px;
+          background: rgba(15, 23, 42, 0.9);
           border: 1px solid
-            rgba(148, 163, 184, 0.14);
+            rgba(148, 163, 184, 0.13);
           box-shadow:
-            0 25px 70px
-            rgba(0, 0, 0, 0.3);
+            0 20px 50px
+            rgba(0, 0, 0, 0.25);
         }
 
         .search-grid {
           display: grid;
           grid-template-columns:
-            1fr 1fr 1fr 160px;
-          gap: 18px;
+            1fr 1fr 1fr 145px;
+          gap: 10px;
           align-items: end;
         }
 
         .field label {
           display: block;
           color: #94a3b8;
-          font-size: 12px;
+          font-size: 10px;
           font-weight: 900;
-          letter-spacing: 1px;
-          margin-bottom: 9px;
+          letter-spacing: 0.8px;
+          margin: 0 0 5px;
           text-transform: uppercase;
         }
 
-        .search-input {
+        .search-input,
+        .field select {
           width: 100%;
-          height: 54px;
-          border-radius: 14px;
+          height: 42px;
+          border-radius: 10px;
           border: 1px solid #334155;
           background: #020617;
           color: white;
-          padding: 0 14px;
+          padding: 0 11px;
+          font-size: 13px;
           outline: none;
         }
 
-        .search-input:focus {
+        .search-input:focus,
+        .field select:focus {
           border-color: #2196f3;
           box-shadow:
-            0 0 0 3px
+            0 0 0 2px
             rgba(33, 150, 243, 0.12);
         }
 
@@ -1071,21 +947,8 @@ export default function NumbersPage() {
           color: #64748b;
         }
 
-        .field select {
-          width: 100%;
-          height: 54px;
-          border-radius: 14px;
-          border: 1px solid #334155;
-          background: #020617;
-          color: white;
-          padding: 0 15px;
-          font-size: 15px;
-          outline: none;
-          cursor: pointer;
-        }
-
         .field select:disabled {
-          opacity: 0.55;
+          opacity: 0.5;
           cursor: not-allowed;
         }
 
@@ -1098,34 +961,34 @@ export default function NumbersPage() {
           position: absolute;
           left: 0;
           right: 0;
-          top: calc(100% + 7px);
-          max-height: 300px;
+          top: calc(100% + 5px);
+          max-height: 240px;
           overflow-y: auto;
           z-index: 100;
           border: 1px solid #334155;
-          border-radius: 14px;
+          border-radius: 10px;
           background: #020617;
           box-shadow:
-            0 20px 50px
-            rgba(0, 0, 0, 0.45);
+            0 15px 35px
+            rgba(0, 0, 0, 0.5);
         }
 
         .dropdown-item {
           width: 100%;
-          min-height: 52px;
+          min-height: 42px;
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 14px;
+          gap: 10px;
           border: 0;
           border-bottom: 1px solid
             rgba(148, 163, 184, 0.08);
           background: transparent;
           color: white;
-          padding: 12px 15px;
+          padding: 8px 11px;
           text-align: left;
           cursor: pointer;
-          font-size: 14px;
+          font-size: 12px;
           font-weight: 700;
         }
 
@@ -1141,23 +1004,23 @@ export default function NumbersPage() {
 
         .dropdown-item small {
           color: #64748b;
-          font-size: 11px;
+          font-size: 9px;
           font-weight: 800;
           text-transform: uppercase;
         }
 
         .dropdown-empty {
-          padding: 18px 15px;
+          padding: 14px;
           color: #64748b;
-          font-size: 13px;
+          font-size: 12px;
           text-align: center;
         }
 
         .search-button {
-          height: 54px;
+          height: 42px;
           width: 100%;
           border: 0;
-          border-radius: 14px;
+          border-radius: 10px;
           color: white;
           background:
             linear-gradient(
@@ -1165,9 +1028,13 @@ export default function NumbersPage() {
               #0ea5e9,
               #2563eb
             );
-          font-size: 15px;
+          font-size: 12px;
           font-weight: 900;
           cursor: pointer;
+        }
+
+        .search-button:hover:not(:disabled) {
+          filter: brightness(1.08);
         }
 
         .search-button:disabled {
@@ -1176,9 +1043,10 @@ export default function NumbersPage() {
         }
 
         .alert {
-          margin-top: 22px;
-          border-radius: 16px;
-          padding: 16px 20px;
+          margin-top: 10px;
+          border-radius: 10px;
+          padding: 10px 12px;
+          font-size: 12px;
           font-weight: 600;
         }
 
@@ -1197,9 +1065,9 @@ export default function NumbersPage() {
         }
 
         .service-card {
-          margin-top: 25px;
-          border-radius: 24px;
-          padding: 25px;
+          margin-top: 10px;
+          border-radius: 14px;
+          padding: 13px;
           background: rgba(15, 23, 42, 0.75);
           border: 1px solid
             rgba(148, 163, 184, 0.12);
@@ -1207,49 +1075,47 @@ export default function NumbersPage() {
 
         .service-grid {
           display: grid;
-          grid-template-columns:
-            1fr 1fr 1fr;
-          gap: 20px;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 12px;
         }
 
         .service-label {
           color: #64748b;
-          font-size: 12px;
+          font-size: 9px;
           font-weight: 800;
           text-transform: uppercase;
-          letter-spacing: 1px;
+          letter-spacing: 0.8px;
         }
 
         .service-value {
-          margin-top: 6px;
-          font-size: 20px;
+          margin-top: 3px;
+          font-size: 15px;
           font-weight: 900;
         }
 
         .price {
           color: #38bdf8;
-          font-size: 25px;
         }
 
         .results {
-          margin-top: 30px;
+          margin-top: 16px;
         }
 
         .results-title {
-          font-size: 24px;
+          font-size: 17px;
           font-weight: 900;
-          margin-bottom: 18px;
+          margin-bottom: 8px;
         }
 
         .result-card {
-          border-radius: 25px;
-          padding: 26px;
-          margin-bottom: 15px;
+          border-radius: 14px;
+          padding: 14px;
+          margin-bottom: 8px;
           background:
             linear-gradient(
               135deg,
-              rgba(15, 23, 42, 0.95),
-              rgba(15, 23, 42, 0.7)
+              rgba(15, 23, 42, 0.96),
+              rgba(15, 23, 42, 0.75)
             );
           border: 1px solid
             rgba(56, 189, 248, 0.12);
@@ -1259,63 +1125,63 @@ export default function NumbersPage() {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 30px;
+          gap: 15px;
         }
 
         .available {
           color: #38bdf8;
-          font-size: 11px;
+          font-size: 9px;
           font-weight: 900;
-          letter-spacing: 2px;
+          letter-spacing: 1.5px;
           text-transform: uppercase;
         }
 
         .result-name {
-          font-size: 24px;
+          font-size: 17px;
           font-weight: 900;
-          margin-top: 8px;
+          margin-top: 3px;
         }
 
         .badges {
           display: flex;
           flex-wrap: wrap;
-          gap: 8px;
-          margin-top: 13px;
+          gap: 5px;
+          margin-top: 7px;
         }
 
         .badge {
-          padding: 7px 11px;
+          padding: 4px 7px;
           border-radius: 999px;
           background: #1e293b;
           color: #cbd5e1;
-          font-size: 12px;
+          font-size: 9px;
           font-weight: 700;
         }
 
         .result-right {
           display: flex;
           align-items: center;
-          gap: 25px;
+          gap: 12px;
         }
 
         .customer-label {
           color: #64748b;
-          font-size: 11px;
+          font-size: 8px;
           text-transform: uppercase;
           font-weight: 800;
         }
 
         .customer-price {
           color: #38bdf8;
-          font-size: 29px;
+          font-size: 20px;
           font-weight: 900;
-          margin-top: 4px;
+          margin-top: 2px;
         }
 
         .buy-button {
           border: 0;
-          border-radius: 14px;
-          padding: 15px 24px;
+          border-radius: 9px;
+          padding: 10px 15px;
           background:
             linear-gradient(
               135deg,
@@ -1323,7 +1189,7 @@ export default function NumbersPage() {
               #2563eb
             );
           color: white;
-          font-size: 14px;
+          font-size: 11px;
           font-weight: 900;
           cursor: pointer;
         }
@@ -1333,54 +1199,21 @@ export default function NumbersPage() {
           cursor: not-allowed;
         }
 
+        /*
+         * IMPORTANT:
+         * The large "Find a Number" placeholder is
+         * intentionally hidden until search results exist.
+         */
         .empty {
-          margin-top: 30px;
-          min-height: 260px;
-          border-radius: 25px;
-          border: 1px solid
-            rgba(148, 163, 184, 0.12);
-          background: rgba(15, 23, 42, 0.55);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          text-align: center;
-          padding: 35px;
-        }
-
-        .empty-icon {
-          width: 70px;
-          height: 70px;
-          border-radius: 22px;
-          margin: 0 auto 18px;
-          background:
-            linear-gradient(
-              135deg,
-              #0ea5e9,
-              #2563eb
-            );
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 30px;
-        }
-
-        .empty-title {
-          font-size: 22px;
-          font-weight: 900;
-        }
-
-        .empty-text {
-          color: #64748b;
-          margin-top: 8px;
-          line-height: 1.6;
+          display: none;
         }
 
         @media (max-width: 900px) {
-          .hero {
-            grid-template-columns: 1fr;
+          .page-container {
+            padding-top: 18px;
           }
 
-          .visual {
+          .hero p {
             display: none;
           }
 
@@ -1388,57 +1221,176 @@ export default function NumbersPage() {
             grid-template-columns: 1fr 1fr;
           }
 
-          .service-grid {
-            grid-template-columns: 1fr 1fr;
-          }
-
-          .result-row {
-            flex-direction: column;
-            align-items: flex-start;
-          }
-
-          .result-right {
-            width: 100%;
-            justify-content: space-between;
+          .search-button {
+            grid-column: 1 / -1;
           }
         }
 
         @media (max-width: 600px) {
           .topbar {
-            padding: 0 5%;
+            height: 56px;
+            padding: 0 4%;
+          }
+
+          .brand {
+            font-size: 19px;
           }
 
           .nav {
-            gap: 12px;
+            gap: 10px;
           }
 
           .nav a {
-            font-size: 12px;
+            font-size: 10px;
           }
 
           .page-container {
-            padding-top: 45px;
+            width: 94%;
+            padding: 12px 0 35px;
+          }
+
+          .security-warning {
+            margin-bottom: 9px;
+            padding: 8px 9px;
+            font-size: 10px;
+            border-radius: 9px;
+          }
+
+          .warning-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 6px;
+            font-size: 11px;
+          }
+
+          .hero {
+            margin-bottom: 9px;
+            padding: 2px 1px;
+          }
+
+          .eyebrow {
+            font-size: 8px;
+            letter-spacing: 1.5px;
+            margin-bottom: 4px;
           }
 
           .hero h1 {
-            font-size: 48px;
+            font-size: 28px;
+            letter-spacing: -1.2px;
+          }
+
+          .search-card {
+            padding: 11px;
+            border-radius: 13px;
           }
 
           .search-grid {
             grid-template-columns: 1fr;
+            gap: 7px;
+          }
+
+          .field label {
+            display: inline-block;
+            margin-bottom: 3px;
+            font-size: 9px;
+          }
+
+          .search-input,
+          .field select {
+            height: 38px;
+            border-radius: 8px;
+            font-size: 12px;
+            padding: 0 9px;
+          }
+
+          .search-button {
+            height: 38px;
+            grid-column: auto;
+            border-radius: 8px;
+            font-size: 11px;
           }
 
           .service-grid {
-            grid-template-columns: 1fr;
+            grid-template-columns:
+              1fr 1fr 1fr;
+            gap: 7px;
+          }
+
+          .service-card {
+            padding: 10px;
+            border-radius: 10px;
+          }
+
+          .service-value {
+            font-size: 12px;
+          }
+
+          .results {
+            margin-top: 12px;
+          }
+
+          .results-title {
+            font-size: 15px;
+            margin-bottom: 7px;
+          }
+
+          .result-card {
+            padding: 11px;
+            border-radius: 10px;
+          }
+
+          .result-row {
+            gap: 8px;
+          }
+
+          .result-name {
+            font-size: 14px;
           }
 
           .result-right {
-            flex-direction: column;
-            align-items: flex-start;
+            gap: 7px;
+          }
+
+          .customer-price {
+            font-size: 16px;
           }
 
           .buy-button {
-            width: 100%;
+            padding: 8px 10px;
+            font-size: 9px;
+          }
+
+          .badge {
+            font-size: 8px;
+            padding: 3px 5px;
+          }
+        }
+
+        @media (max-width: 390px) {
+          .nav {
+            gap: 7px;
+          }
+
+          .nav a {
+            font-size: 9px;
+          }
+
+          .security-warning {
+            font-size: 9px;
+          }
+
+          .hero h1 {
+            font-size: 25px;
+          }
+
+          .search-card {
+            padding: 9px;
+          }
+
+          .search-input,
+          .field select,
+          .search-button {
+            height: 36px;
           }
         }
       `}</style>
@@ -1469,38 +1421,41 @@ export default function NumbersPage() {
           </nav>
         </header>
 
-        <div className="page-container">
-          <section className="hero">
+        <main className="page-container">
+
+          <div className="security-warning">
+            <div className="warning-icon">
+              !
+            </div>
+
             <div>
-              <div className="eyebrow">
-                Live Number Marketplace
-              </div>
+              <strong>Security reminder:</strong>{" "}
+              Enable 2FA and add a recovery email to
+              protect your account and purchased
+              services. Use a trusted VPN when
+              appropriate.
+            </div>
+          </div>
 
-              <h1>
-                Browse{" "}
-                <span>Numbers.</span>
-              </h1>
-
-              <p>
-                Find available virtual
-                numbers from our live
-                catalogue. Select your
-                country, operator and
-                service to see current
-                availability and Moriki
-                pricing.
-              </p>
+          <section className="hero">
+            <div className="eyebrow">
+              Live Number Marketplace
             </div>
 
-            <div className="visual">
-              <div className="visual-phone">
-                <div className="visual-phone-inner" />
-              </div>
-            </div>
+            <h1>
+              Browse{" "}
+              <span>Virtual Numbers.</span>
+            </h1>
+
+            <p>
+              Select a country, operator and service
+              to check live number availability.
+            </p>
           </section>
 
           <section className="search-card">
             <div className="search-grid">
+
               <div className="field">
                 <label>
                   Country
@@ -1520,7 +1475,7 @@ export default function NumbersPage() {
                     }
                     placeholder={
                       loadingCountries
-                        ? "Loading countries..."
+                        ? "Loading..."
                         : "Search country..."
                     }
                     disabled={
@@ -1595,7 +1550,7 @@ export default function NumbersPage() {
                     {!country
                       ? "Select country first"
                       : operators.length === 0
-                        ? "No operators available"
+                        ? "No operators"
                         : "Select operator"}
                   </option>
 
@@ -1635,11 +1590,11 @@ export default function NumbersPage() {
                     }}
                     placeholder={
                       !country
-                        ? "Select country first"
+                        ? "Select country"
                         : !operator
-                          ? "Select operator first"
+                          ? "Select operator"
                           : loadingProducts
-                            ? "Loading services..."
+                            ? "Loading..."
                             : "Search service..."
                     }
                     disabled={
@@ -1718,6 +1673,7 @@ export default function NumbersPage() {
                   ? "Searching..."
                   : "Search Numbers"}
               </button>
+
             </div>
           </section>
 
@@ -1736,6 +1692,7 @@ export default function NumbersPage() {
           {selectedProduct && (
             <section className="service-card">
               <div className="service-grid">
+
                 <div>
                   <div className="service-label">
                     Service
@@ -1769,11 +1726,12 @@ export default function NumbersPage() {
                     )}
                   </div>
                 </div>
+
               </div>
             </section>
           )}
 
-          {results.length > 0 ? (
+          {results.length > 0 && (
             <section className="results">
               <div className="results-title">
                 Available Numbers
@@ -1786,6 +1744,7 @@ export default function NumbersPage() {
                     key={`${item.country}-${item.operator}-${item.service}-${index}`}
                   >
                     <div className="result-row">
+
                       <div>
                         <div className="available">
                           Available
@@ -1820,6 +1779,7 @@ export default function NumbersPage() {
                       </div>
 
                       <div className="result-right">
+
                         <div>
                           <div className="customer-label">
                             Customer Price
@@ -1844,37 +1804,17 @@ export default function NumbersPage() {
                             ? "Processing..."
                             : "Buy Number"}
                         </button>
+
                       </div>
+
                     </div>
                   </div>
                 )
               )}
             </section>
-          ) : (
-            <section className="empty">
-              <div>
-                <div className="empty-icon">
-                  #
-                </div>
-
-                <div className="empty-title">
-                  Find a Number
-                </div>
-
-                <div className="empty-text">
-                  Search for a country and
-                  service, select an
-                  operator, then press{" "}
-                  <strong>
-                    Search Numbers
-                  </strong>{" "}
-                  to check live
-                  availability.
-                </div>
-              </div>
-            </section>
           )}
-        </div>
+
+        </main>
       </div>
     </>
   );
