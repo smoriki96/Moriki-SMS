@@ -32,38 +32,118 @@ type SearchResult = {
   currency: string;
 };
 
+const REQUEST_TIMEOUT = 15000;
+
 function naira(value: number) {
-  return `₦${Number(value || 0).toLocaleString("en-NG")}`;
+  return `?${Number(value || 0).toLocaleString("en-NG")}`;
 }
 
 function pretty(value: string) {
   return String(value || "")
     .replace(/[-_]/g, " ")
-    .replace(/\b\w/g, (letter) =>
-      letter.toUpperCase()
-    );
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+/*
+ * Never show raw provider errors to customers.
+ * Detailed information is logged only in the browser console.
+ */
+function friendlyError(
+  action: "countries" | "services" | "search" | "purchase",
+  error?: unknown
+) {
+  console.error(`MORIKI ${action.toUpperCase()} ERROR:`, error);
+
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return "The request took too long. Please try again.";
+  }
+
+  if (action === "countries") {
+    return "Unable to load countries right now. Please refresh and try again.";
+  }
+
+  if (action === "services") {
+    return "Unable to load services for this selection. Please try another country or operator.";
+  }
+
+  if (action === "search") {
+    return "We could not find available numbers for this selection. Please try another service or operator.";
+  }
+
+  if (action === "purchase") {
+    return "We could not complete the purchase right now. Please check your balance and try again.";
+  }
+
+  return "Something went wrong. Please try again.";
+}
+
+async function fetchJson(
+  url: string,
+  options: RequestInit = {}
+) {
+  const controller = new AbortController();
+
+  const timeout = window.setTimeout(() => {
+    controller.abort();
+  }, REQUEST_TIMEOUT);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+
+    const text = await response.text();
+
+    let data: any = null;
+
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      console.error("MORIKI INVALID JSON RESPONSE:", {
+        url,
+        status: response.status,
+        body: text,
+      });
+
+      throw new Error("INVALID_SERVER_RESPONSE");
+    }
+
+    if (!response.ok || !data?.success) {
+      /*
+       * Log the real server response internally,
+       * but do not expose it to the customer.
+       */
+      console.error("MORIKI API FAILURE:", {
+        url,
+        status: response.status,
+        data,
+      });
+
+      throw new Error("PROVIDER_REQUEST_FAILED");
+    }
+
+    return data;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 export default function NumbersPage() {
   const router = useRouter();
 
-  const [countries, setCountries] =
-    useState<Country[]>([]);
+  const [countries, setCountries] = useState<Country[]>([]);
 
-  const [country, setCountry] =
-    useState("");
+  const [country, setCountry] = useState("");
+  const [operator, setOperator] = useState("");
+  const [service, setService] = useState("");
 
-  const [operator, setOperator] =
-    useState("");
+  const [countrySearch, setCountrySearch] = useState("");
+  const [serviceSearch, setServiceSearch] = useState("");
 
-  const [service, setService] =
-    useState("");
-
-  const [products, setProducts] =
-    useState<Product[]>([]);
-
-  const [results, setResults] =
-    useState<SearchResult[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [results, setResults] = useState<SearchResult[]>([]);
 
   const [loadingCountries, setLoadingCountries] =
     useState(true);
@@ -89,228 +169,166 @@ export default function NumbersPage() {
    * ========================================
    */
   useEffect(() => {
+    let cancelled = false;
+
     async function loadCountries() {
       try {
         setLoadingCountries(true);
         setError("");
 
-        const response = await fetch(
-          "/api/5sim?action=countries",
-          {
-            cache: "no-store",
-          }
+        const data = await fetchJson(
+          "/api/5sim?action=countries"
         );
 
-        const text =
-          await response.text();
+        if (cancelled) return;
 
-        let data: any;
+        const incoming = Array.isArray(data?.countries)
+          ? data.countries
+          : [];
 
-        try {
-          data = JSON.parse(text);
-        } catch {
-          throw new Error(
-            "The server returned an invalid response while loading countries."
-          );
-        }
+        const uniqueMap = new Map<string, Country>();
 
-        if (
-          !response.ok ||
-          !data.success
-        ) {
-          throw new Error(
-            data?.error ||
-              "Unable to load countries."
-          );
-        }
+        incoming.forEach((item: any) => {
+          const realKey =
+            item?.key ||
+            item?.code ||
+            item?.country;
 
-        const incoming =
-          Array.isArray(
-            data.countries
-          )
-            ? data.countries
-            : [];
+          if (
+            typeof realKey !== "string" ||
+            !realKey.trim()
+          ) {
+            return;
+          }
 
-        const uniqueMap =
-          new Map<
-            string,
-            Country
-          >();
+          const key = realKey
+            .trim()
+            .toLowerCase();
 
-        incoming.forEach(
-          (item: any) => {
-            const realKey =
-              item?.key ||
-              item?.code ||
-              item?.country;
+          const name =
+            item?.name ||
+            item?.text_en ||
+            pretty(key);
 
-            if (
-              typeof realKey !==
-                "string" ||
-              !realKey.trim()
-            ) {
-              return;
-            }
+          let operators: string[] = [];
 
-            const key =
-              realKey
-                .trim()
-                .toLowerCase();
+          if (Array.isArray(item?.operators)) {
+            operators = item.operators
+              .map((value: any) => String(value))
+              .filter(Boolean);
+          }
 
-            const name =
-              item?.name ||
-              item?.text_en ||
-              pretty(key);
+          /*
+           * Some provider responses expose
+           * operators as object keys.
+           */
+          if (
+            operators.length === 0 &&
+            item &&
+            typeof item === "object"
+          ) {
+            const ignoredKeys = new Set([
+              "key",
+              "code",
+              "country",
+              "name",
+              "text_en",
+              "text_ru",
+              "iso",
+              "prefix",
+            ]);
 
-            let operators: string[] =
-              [];
-
-            if (
-              Array.isArray(
-                item?.operators
-              )
-            ) {
-              operators =
-                item.operators
-                  .map(
-                    (value: any) =>
-                      String(value)
-                  )
-                  .filter(Boolean);
-            }
-
-            /*
-             * Some 5SIM responses store
-             * operators as object keys.
-             */
-            if (
-              operators.length ===
-                0 &&
-              item &&
-              typeof item ===
-                "object"
-            ) {
-              const ignoredKeys =
-                new Set([
-                  "key",
-                  "code",
-                  "country",
-                  "name",
-                  "text_en",
-                  "text_ru",
-                  "iso",
-                  "prefix",
-                ]);
-
-              operators =
-                Object.keys(
-                  item
-                ).filter(
-                  (operatorName) =>
-                    !ignoredKeys.has(
-                      operatorName
-                    ) &&
-                    item[
-                      operatorName
-                    ] &&
-                    typeof item[
-                      operatorName
-                    ] === "object"
-                );
-            }
-
-            operators =
-              Array.from(
-                new Set(
-                  operators
-                )
-              ).sort();
-
-            uniqueMap.set(
-              key,
-              {
-                key,
-                name: String(
-                  name
-                ),
-                operators,
-              }
+            operators = Object.keys(item).filter(
+              (operatorName) =>
+                !ignoredKeys.has(operatorName) &&
+                item[operatorName] &&
+                typeof item[operatorName] === "object"
             );
           }
+
+          operators = Array.from(
+            new Set(operators)
+          ).sort();
+
+          uniqueMap.set(key, {
+            key,
+            name: String(name),
+            operators,
+          });
+        });
+
+        const unique = Array.from(
+          uniqueMap.values()
+        ).sort((a, b) =>
+          a.name.localeCompare(b.name)
         );
 
-        const unique =
-          Array.from(
-            uniqueMap.values()
-          ).sort((a, b) =>
-            a.name.localeCompare(
-              b.name
-            )
-          );
-
-        if (
-          unique.length === 0
-        ) {
-          throw new Error(
-            "No valid 5SIM countries were returned."
-          );
+        if (unique.length === 0) {
+          throw new Error("NO_COUNTRIES");
         }
 
-        setCountries(
-          unique
-        );
+        setCountries(unique);
       } catch (err) {
-        setCountries([]);
+        if (cancelled) return;
 
+        setCountries([]);
         setError(
-          err instanceof Error
-            ? err.message
-            : "Unable to load countries."
+          friendlyError("countries", err)
         );
       } finally {
-        setLoadingCountries(
-          false
-        );
+        if (!cancelled) {
+          setLoadingCountries(false);
+        }
       }
     }
 
     loadCountries();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  /*
+   * ========================================
+   * FILTER COUNTRIES
+   * ========================================
+   */
+  const filteredCountries = useMemo(() => {
+    const query =
+      countrySearch.trim().toLowerCase();
+
+    if (!query) {
+      return countries;
+    }
+
+    return countries.filter((item) =>
+      `${item.name} ${item.key}`
+        .toLowerCase()
+        .includes(query)
+    );
+  }, [countries, countrySearch]);
 
   /*
    * ========================================
    * SELECTED COUNTRY
    * ========================================
    */
-  const selectedCountry =
-    useMemo(() => {
-      return countries.find(
-        (item) =>
-          item.key ===
-          country
-      );
-    }, [
-      countries,
-      country,
-    ]);
+  const selectedCountry = useMemo(() => {
+    return countries.find(
+      (item) => item.key === country
+    );
+  }, [countries, country]);
 
-  const operators =
-    useMemo(() => {
-      if (
-        !selectedCountry
-      ) {
-        return [];
-      }
+  const operators = useMemo(() => {
+    if (!selectedCountry) {
+      return [];
+    }
 
-      return Array.from(
-        new Set(
-          selectedCountry
-            .operators || []
-        )
-      ).sort();
-    }, [
-      selectedCountry,
-    ]);
+    return Array.from(
+      new Set(selectedCountry.operators || [])
+    ).sort();
+  }, [selectedCountry]);
 
   /*
    * ========================================
@@ -322,6 +340,7 @@ export default function NumbersPage() {
     setService("");
     setProducts([]);
     setResults([]);
+    setServiceSearch("");
     setMessage("");
   }, [country]);
 
@@ -335,223 +354,147 @@ export default function NumbersPage() {
       return;
     }
 
+    let cancelled = false;
+
     async function loadServices() {
       try {
-        setLoadingProducts(
-          true
-        );
+        setLoadingProducts(true);
         setError("");
         setService("");
+        setServiceSearch("");
         setResults([]);
 
-        /*
-         * If operator is empty,
-         * the API will automatically
-         * choose a real 5SIM operator.
-         */
         const selectedOperator =
           operator || "any";
 
         const url =
           `/api/5sim?action=products` +
-          `&country=${encodeURIComponent(
-            country
-          )}` +
+          `&country=${encodeURIComponent(country)}` +
           `&operator=${encodeURIComponent(
             selectedOperator
           )}`;
 
         console.log(
-          "Loading 5SIM products:",
+          "MORIKI: Loading products",
           {
             country,
-            operator:
-              selectedOperator,
-            url,
+            operator: selectedOperator,
           }
         );
 
-        const response =
-          await fetch(
-            url,
-            {
-              cache:
-                "no-store",
-            }
-          );
+        const data = await fetchJson(url);
 
-        const text =
-          await response.text();
+        if (cancelled) return;
 
-        let data: any;
-
-        try {
-          data =
-            JSON.parse(
-              text
-            );
-        } catch {
-          throw new Error(
-            "The server returned an invalid response while loading services."
-          );
-        }
-
-        if (
-          !response.ok ||
-          !data.success
-        ) {
-          throw new Error(
-            data?.error ||
-              "Unable to load services."
-          );
-        }
-
-        /*
-         * IMPORTANT:
-         *
-         * The API returns:
-         *
-         * {
-         *   product: "telegram",
-         *   priceUSD: 0.13,
-         *   quantity: 55032
-         * }
-         *
-         * NOT:
-         *
-         * {
-         *   name: "telegram"
-         * }
-         */
         const incoming =
-          Array.isArray(
-            data.products
-          )
+          Array.isArray(data?.products)
             ? data.products
             : [];
 
         const productMap =
-          new Map<
-            string,
-            Product
-          >();
+          new Map<string, Product>();
 
-        incoming.forEach(
-          (item: any) => {
-            const name =
-              String(
-                item?.product ||
-                  item?.name ||
-                  ""
-              ).trim();
+        incoming.forEach((item: any) => {
+          const name = String(
+            item?.product ||
+              item?.name ||
+              ""
+          ).trim();
 
-            if (!name) {
-              return;
-            }
-
-            if (
-              !productMap.has(
-                name
-              )
-            ) {
-              productMap.set(
-                name,
-                {
-                  name,
-
-                  category:
-                    item?.category ||
-                    item?.Category ||
-                    null,
-
-                  quantity:
-                    Number(
-                      item?.quantity ||
-                        item?.Qty ||
-                        0
-                    ),
-
-                  priceUSD:
-                    Number(
-                      item?.priceUSD ||
-                        item?.Price ||
-                        0
-                    ),
-
-                  basePriceNGN:
-                    Number(
-                      item?.basePriceNGN ||
-                        0
-                    ),
-
-                  profitNGN:
-                    Number(
-                      item?.profitNGN ||
-                        0
-                    ),
-
-                  priceNGN:
-                    Number(
-                      item?.priceNGN ||
-                        0
-                    ),
-                }
-              );
-            }
+          if (!name) {
+            return;
           }
-        );
+
+          if (!productMap.has(name)) {
+            productMap.set(name, {
+              name,
+
+              category:
+                item?.category ||
+                item?.Category ||
+                null,
+
+              quantity: Number(
+                item?.quantity ||
+                  item?.Qty ||
+                  0
+              ),
+
+              priceUSD: Number(
+                item?.priceUSD ||
+                  item?.Price ||
+                  0
+              ),
+
+              basePriceNGN: Number(
+                item?.basePriceNGN || 0
+              ),
+
+              profitNGN: Number(
+                item?.profitNGN || 0
+              ),
+
+              priceNGN: Number(
+                item?.priceNGN || 0
+              ),
+            });
+          }
+        });
 
         const unique =
           Array.from(
             productMap.values()
           ).sort((a, b) =>
-            a.name.localeCompare(
-              b.name
-            )
+            a.name.localeCompare(b.name)
           );
 
-        setProducts(
-          unique
-        );
+        setProducts(unique);
 
-        /*
-         * The API tells us which real
-         * operator was actually used.
-         *
-         * If the user didn't choose one,
-         * select that real operator in
-         * the dropdown.
-         */
-        if (
-          !operator &&
-          data.operator
-        ) {
+        if (!operator && data?.operator) {
           setOperator(
-            String(
-              data.operator
-            )
+            String(data.operator)
           );
         }
       } catch (err) {
-        setProducts([]);
+        if (cancelled) return;
 
+        setProducts([]);
         setError(
-          err instanceof Error
-            ? err.message
-            : "Unable to load services."
+          friendlyError("services", err)
         );
       } finally {
-        setLoadingProducts(
-          false
-        );
+        if (!cancelled) {
+          setLoadingProducts(false);
+        }
       }
     }
 
     loadServices();
-  }, [
-    country,
-    operator,
-  ]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [country, operator]);
+
+  /*
+   * ========================================
+   * FILTER SERVICES
+   * ========================================
+   */
+  const filteredProducts = useMemo(() => {
+    const query =
+      serviceSearch.trim().toLowerCase();
+
+    if (!query) {
+      return products;
+    }
+
+    return products.filter((item) =>
+      `${item.name} ${item.category || ""}`
+        .toLowerCase()
+        .includes(query)
+    );
+  }, [products, serviceSearch]);
 
   /*
    * ========================================
@@ -560,23 +503,17 @@ export default function NumbersPage() {
    */
   async function searchNumbers() {
     if (!country) {
-      setError(
-        "Please select a country."
-      );
+      setError("Please select a country.");
       return;
     }
 
     if (!operator) {
-      setError(
-        "Please select an operator."
-      );
+      setError("Please select an operator.");
       return;
     }
 
     if (!service) {
-      setError(
-        "Please select a service."
-      );
+      setError("Please select a service.");
       return;
     }
 
@@ -588,147 +525,71 @@ export default function NumbersPage() {
 
       const url =
         `/api/5sim?action=search` +
-        `&country=${encodeURIComponent(
-          country
-        )}` +
-        `&operator=${encodeURIComponent(
-          operator
-        )}` +
-        `&product=${encodeURIComponent(
-          service
-        )}`;
+        `&country=${encodeURIComponent(country)}` +
+        `&operator=${encodeURIComponent(operator)}` +
+        `&product=${encodeURIComponent(service)}`;
 
       console.log(
-        "Searching 5SIM numbers:",
+        "MORIKI: Searching numbers",
         {
           country,
           operator,
-          product:
-            service,
-          url,
+          service,
         }
       );
 
-      const response =
-        await fetch(
-          url,
-          {
-            cache:
-              "no-store",
-          }
-        );
+      const data = await fetchJson(url);
 
-      const text =
-        await response.text();
+      const found: SearchResult = {
+        country: String(
+          data?.country || country
+        ),
 
-      let data: any;
+        operator: String(
+          data?.operator || operator
+        ),
 
-      try {
-        data =
-          JSON.parse(
-            text
-          );
-      } catch {
-        throw new Error(
-          "The server returned an invalid response while searching."
-        );
-      }
+        service: String(
+          data?.product || service
+        ),
 
-      if (
-        !response.ok ||
-        !data.success
-      ) {
-        throw new Error(
-          data?.error ||
-            "Unable to search for numbers."
-        );
-      }
+        quantity: Number(
+          data?.quantity || 0
+        ),
 
-      /*
-       * The current API returns the
-       * selected product directly,
-       * not data.results[].
-       *
-       * Convert it into the format
-       * used by the result cards.
-       */
-      const found: SearchResult =
-        {
-          country:
-            String(
-              data.country ||
-                country
-            ),
+        priceUSD: Number(
+          data?.priceUSD || 0
+        ),
 
-          operator:
-            String(
-              data.operator ||
-                operator
-            ),
+        basePriceNGN: Number(
+          data?.basePriceNGN || 0
+        ),
 
-          service:
-            String(
-              data.product ||
-                service
-            ),
+        profitNGN: Number(
+          data?.profitNGN || 0
+        ),
 
-          quantity:
-            Number(
-              data.quantity ||
-                0
-            ),
+        priceNGN: Number(
+          data?.priceNGN || 0
+        ),
 
-          priceUSD:
-            Number(
-              data.priceUSD ||
-                0
-            ),
+        currency: "NGN",
+      };
 
-          basePriceNGN:
-            Number(
-              data.basePriceNGN ||
-                0
-            ),
-
-          profitNGN:
-            Number(
-              data.profitNGN ||
-                0
-            ),
-
-          priceNGN:
-            Number(
-              data.priceNGN ||
-                0
-            ),
-
-          currency:
-            "NGN",
-        };
-
-      if (
-        found.quantity <=
-        0
-      ) {
+      if (found.quantity <= 0) {
         setMessage(
-          "No available numbers were found for this selection."
+          "No available numbers were found for this selection. Please try another service or operator."
         );
         return;
       }
 
-      setResults([
-        found,
-      ]);
+      setResults([found]);
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to search for numbers."
+        friendlyError("search", err)
       );
     } finally {
-      setSearching(
-        false
-      );
+      setSearching(false);
     }
   }
 
@@ -736,30 +597,37 @@ export default function NumbersPage() {
    * ========================================
    * BUY NUMBER
    * ========================================
+   *
+   * Existing purchase flow preserved.
    */
   async function buyNumber(
     item: SearchResult
   ) {
+    if (buying) {
+      return;
+    }
+
     try {
       setBuying(true);
       setError("");
       setMessage("");
 
       const {
-        data: {
-          session,
-        },
-        error:
-          sessionError,
+        data: { session },
+        error: sessionError,
       } =
         await supabase.auth.getSession();
 
-      if (
-        sessionError ||
-        !session
-      ) {
+      if (sessionError) {
+        console.error(
+          "MORIKI SESSION ERROR:",
+          sessionError
+        );
+      }
+
+      if (!session) {
         setError(
-          "Please log in before purchasing a number."
+          "Your session has expired. Please log in again."
         );
         return;
       }
@@ -777,63 +645,24 @@ export default function NumbersPage() {
         )}`;
 
       console.log(
-        "Buying 5SIM number:",
+        "MORIKI: Starting number purchase",
         {
-          country:
-            item.country,
-          operator:
-            item.operator,
-          product:
-            item.service,
+          country: item.country,
+          operator: item.operator,
+          product: item.service,
         }
       );
 
-      const response =
-        await fetch(
-          url,
-          {
-            method:
-              "GET",
-
-            cache:
-              "no-store",
-
-            headers: {
-              Authorization:
-                `Bearer ${session.access_token}`,
-            },
-          }
-        );
-
-      const text =
-        await response.text();
-
-      let data: any;
-
-      try {
-        data =
-          JSON.parse(
-            text
-          );
-      } catch {
-        throw new Error(
-          "The purchase server returned an invalid response."
-        );
-      }
-
-      if (
-        !response.ok ||
-        !data.success
-      ) {
-        throw new Error(
-          data?.error ||
-            "Unable to purchase number."
-        );
-      }
+      const data = await fetchJson(url, {
+        method: "GET",
+        headers: {
+          Authorization:
+            `Bearer ${session.access_token}`,
+        },
+      });
 
       const activationData =
-        data.data ||
-        data;
+        data?.data || data;
 
       try {
         sessionStorage.setItem(
@@ -842,47 +671,43 @@ export default function NumbersPage() {
             activationData
           )
         );
-      } catch {}
+      } catch (storageError) {
+        console.error(
+          "MORIKI SESSION STORAGE ERROR:",
+          storageError
+        );
+      }
 
       const orderId =
-        data.orderId ||
-        activationData.orderId ||
-        activationData.order_id;
+        data?.orderId ||
+        activationData?.orderId ||
+        activationData?.order_id;
 
       if (orderId) {
         router.push(
           `/activation?id=${encodeURIComponent(
-            String(
-              orderId
-            )
+            String(orderId)
           )}`
         );
       } else {
-        router.push(
-          "/activation"
-        );
+        router.push("/activation");
       }
     } catch (err) {
+      /*
+       * Real provider error stays in console.
+       * Customer gets only a friendly message.
+       */
       setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to purchase number."
+        friendlyError("purchase", err)
       );
     } finally {
       setBuying(false);
     }
   }
 
-  /*
-   * ========================================
-   * SELECTED PRODUCT
-   * ========================================
-   */
   const selectedProduct =
     products.find(
-      (item) =>
-        item.name ===
-        service
+      (item) => item.name === service
     );
 
   return (
@@ -903,7 +728,8 @@ export default function NumbersPage() {
         }
 
         button,
-        select {
+        select,
+        input {
           font-family: inherit;
         }
 
@@ -936,12 +762,7 @@ export default function NumbersPage() {
           padding: 0 6%;
           border-bottom: 1px solid
             rgba(148, 163, 184, 0.14);
-          background: rgba(
-            2,
-            6,
-            23,
-            0.88
-          );
+          background: rgba(2, 6, 23, 0.88);
           backdrop-filter: blur(16px);
           position: sticky;
           top: 0;
@@ -1030,29 +851,14 @@ export default function NumbersPage() {
           min-height: 250px;
           border-radius: 30px;
           border: 1px solid
-            rgba(
-              56,
-              189,
-              248,
-              0.25
-            );
+            rgba(56, 189, 248, 0.25);
           background:
             radial-gradient(
               circle at 50% 40%,
-              rgba(
-                14,
-                165,
-                233,
-                0.3
-              ),
+              rgba(14, 165, 233, 0.3),
               transparent 42%
             ),
-            rgba(
-              15,
-              23,
-              42,
-              0.8
-            );
+            rgba(15, 23, 42, 0.8);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -1063,20 +869,14 @@ export default function NumbersPage() {
         .visual-phone {
           width: 115px;
           height: 190px;
-          border: 5px solid
-            #38bdf8;
+          border: 5px solid #38bdf8;
           border-radius: 25px;
           display: flex;
           align-items: center;
           justify-content: center;
           box-shadow:
             0 0 60px
-              rgba(
-                14,
-                165,
-                233,
-                0.55
-              );
+              rgba(14, 165, 233, 0.55);
           transform: rotate(-8deg);
         }
 
@@ -1094,27 +894,12 @@ export default function NumbersPage() {
         .search-card {
           border-radius: 28px;
           padding: 30px;
-          background: rgba(
-            15,
-            23,
-            42,
-            0.86
-          );
+          background: rgba(15, 23, 42, 0.86);
           border: 1px solid
-            rgba(
-              148,
-              163,
-              184,
-              0.14
-            );
+            rgba(148, 163, 184, 0.14);
           box-shadow:
             0 25px 70px
-              rgba(
-                0,
-                0,
-                0,
-                0.3
-              );
+              rgba(0, 0, 0, 0.3);
         }
 
         .search-grid {
@@ -1135,12 +920,34 @@ export default function NumbersPage() {
           text-transform: uppercase;
         }
 
+        .search-input {
+          width: 100%;
+          height: 48px;
+          border-radius: 12px;
+          border: 1px solid #334155;
+          background: #020617;
+          color: white;
+          padding: 0 14px;
+          margin-bottom: 8px;
+          outline: none;
+        }
+
+        .search-input:focus {
+          border-color: #2196f3;
+          box-shadow:
+            0 0 0 3px
+              rgba(33, 150, 243, 0.12);
+        }
+
+        .search-input::placeholder {
+          color: #64748b;
+        }
+
         .field select {
           width: 100%;
           height: 54px;
           border-radius: 14px;
-          border: 1px solid
-            #334155;
+          border: 1px solid #334155;
           background: #020617;
           color: white;
           padding: 0 15px;
@@ -1153,12 +960,7 @@ export default function NumbersPage() {
           border-color: #2196f3;
           box-shadow:
             0 0 0 3px
-              rgba(
-                33,
-                150,
-                243,
-                0.12
-              );
+              rgba(33, 150, 243, 0.12);
         }
 
         .field select:disabled {
@@ -1196,36 +998,16 @@ export default function NumbersPage() {
         }
 
         .error {
-          background: rgba(
-            127,
-            29,
-            29,
-            0.28
-          );
+          background: rgba(127, 29, 29, 0.28);
           border: 1px solid
-            rgba(
-              248,
-              113,
-              113,
-              0.3
-            );
+            rgba(248, 113, 113, 0.3);
           color: #fecaca;
         }
 
         .success {
-          background: rgba(
-            6,
-            78,
-            59,
-            0.28
-          );
+          background: rgba(6, 78, 59, 0.28);
           border: 1px solid
-            rgba(
-              52,
-              211,
-              153,
-              0.3
-            );
+            rgba(52, 211, 153, 0.3);
           color: #a7f3d0;
         }
 
@@ -1233,19 +1015,9 @@ export default function NumbersPage() {
           margin-top: 25px;
           border-radius: 24px;
           padding: 25px;
-          background: rgba(
-            15,
-            23,
-            42,
-            0.75
-          );
+          background: rgba(15, 23, 42, 0.75);
           border: 1px solid
-            rgba(
-              148,
-              163,
-              184,
-              0.12
-            );
+            rgba(148, 163, 184, 0.12);
         }
 
         .service-grid {
@@ -1291,26 +1063,11 @@ export default function NumbersPage() {
           background:
             linear-gradient(
               135deg,
-              rgba(
-                15,
-                23,
-                42,
-                0.95
-              ),
-              rgba(
-                15,
-                23,
-                42,
-                0.7
-              )
+              rgba(15, 23, 42, 0.95),
+              rgba(15, 23, 42, 0.7)
             );
           border: 1px solid
-            rgba(
-              56,
-              189,
-              248,
-              0.12
-            );
+            rgba(56, 189, 248, 0.12);
         }
 
         .result-row {
@@ -1396,18 +1153,8 @@ export default function NumbersPage() {
           min-height: 260px;
           border-radius: 25px;
           border: 1px solid
-            rgba(
-              148,
-              163,
-              184,
-              0.12
-            );
-          background: rgba(
-            15,
-            23,
-            42,
-            0.55
-          );
+            rgba(148, 163, 184, 0.12);
+          background: rgba(15, 23, 42, 0.55);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -1453,13 +1200,11 @@ export default function NumbersPage() {
           }
 
           .search-grid {
-            grid-template-columns:
-              1fr 1fr;
+            grid-template-columns: 1fr 1fr;
           }
 
           .service-grid {
-            grid-template-columns:
-              1fr 1fr;
+            grid-template-columns: 1fr 1fr;
           }
 
           .result-row {
@@ -1567,7 +1312,7 @@ export default function NumbersPage() {
             <div className="visual">
               <div className="visual-phone">
                 <div className="visual-phone-inner">
-                  ☎
+                  ?
                 </div>
               </div>
             </div>
@@ -1575,10 +1320,25 @@ export default function NumbersPage() {
 
           <section className="search-card">
             <div className="search-grid">
+
               <div className="field">
                 <label>
-                  Country
+                  ?? Country search
                 </label>
+
+                <input
+                  className="search-input"
+                  value={countrySearch}
+                  onChange={(e) =>
+                    setCountrySearch(
+                      e.target.value
+                    )
+                  }
+                  placeholder="Search country..."
+                  disabled={
+                    loadingCountries
+                  }
+                />
 
                 <select
                   value={country}
@@ -1597,15 +1357,11 @@ export default function NumbersPage() {
                       : "Select country"}
                   </option>
 
-                  {countries.map(
+                  {filteredCountries.map(
                     (item) => (
                       <option
-                        key={
-                          item.key
-                        }
-                        value={
-                          item.key
-                        }
+                        key={item.key}
+                        value={item.key}
                       >
                         {item.name}
                       </option>
@@ -1628,15 +1384,13 @@ export default function NumbersPage() {
                   }
                   disabled={
                     !country ||
-                    operators.length ===
-                      0
+                    operators.length === 0
                   }
                 >
                   <option value="">
                     {!country
                       ? "Select country first"
-                      : operators.length ===
-                        0
+                      : operators.length === 0
                       ? "No operators available"
                       : "Select operator"}
                   </option>
@@ -1647,9 +1401,7 @@ export default function NumbersPage() {
                         key={item}
                         value={item}
                       >
-                        {pretty(
-                          item
-                        )}
+                        {pretty(item)}
                       </option>
                     )
                   )}
@@ -1658,8 +1410,24 @@ export default function NumbersPage() {
 
               <div className="field">
                 <label>
-                  Service
+                  ?? Service search
                 </label>
+
+                <input
+                  className="search-input"
+                  value={serviceSearch}
+                  onChange={(e) =>
+                    setServiceSearch(
+                      e.target.value
+                    )
+                  }
+                  placeholder="Search service..."
+                  disabled={
+                    !country ||
+                    !operator ||
+                    loadingProducts
+                  }
+                />
 
                 <select
                   value={service}
@@ -1672,8 +1440,7 @@ export default function NumbersPage() {
                     !country ||
                     !operator ||
                     loadingProducts ||
-                    products.length ===
-                      0
+                    filteredProducts.length === 0
                   }
                 >
                   <option value="">
@@ -1683,25 +1450,18 @@ export default function NumbersPage() {
                       ? "Select operator first"
                       : loadingProducts
                       ? "Loading services..."
-                      : products.length ===
-                        0
-                      ? "No services available"
+                      : filteredProducts.length === 0
+                      ? "No matching services"
                       : "Select service"}
                   </option>
 
-                  {products.map(
+                  {filteredProducts.map(
                     (item) => (
                       <option
-                        key={
-                          item.name
-                        }
-                        value={
-                          item.name
-                        }
+                        key={item.name}
+                        value={item.name}
                       >
-                        {pretty(
-                          item.name
-                        )}
+                        {pretty(item.name)}
                       </option>
                     )
                   )}
@@ -1734,16 +1494,16 @@ export default function NumbersPage() {
             </div>
           )}
 
-          {message &&
-            !error && (
-              <div className="alert success">
-                {message}
-              </div>
-            )}
+          {message && !error && (
+            <div className="alert success">
+              {message}
+            </div>
+          )}
 
           {selectedProduct && (
             <section className="service-card">
               <div className="service-grid">
+
                 <div>
                   <div className="service-label">
                     Service
@@ -1777,6 +1537,7 @@ export default function NumbersPage() {
                     )}
                   </div>
                 </div>
+
               </div>
             </section>
           )}
@@ -1788,18 +1549,16 @@ export default function NumbersPage() {
               </div>
 
               {results.map(
-                (
-                  item,
-                  index
-                ) => (
+                (item, index) => (
                   <div
                     className="result-card"
                     key={`${item.country}-${item.operator}-${item.service}-${index}`}
                   >
                     <div className="result-row">
+
                       <div>
                         <div className="available">
-                          ● Available
+                          ? Available
                         </div>
 
                         <div className="result-name">
@@ -1809,15 +1568,16 @@ export default function NumbersPage() {
                         </div>
 
                         <div className="badges">
+
                           <span className="badge">
-                            🌍{" "}
+                            ??{" "}
                             {pretty(
                               item.country
                             )}
                           </span>
 
                           <span className="badge">
-                            📡{" "}
+                            ??{" "}
                             {pretty(
                               item.operator
                             )}
@@ -1825,19 +1585,19 @@ export default function NumbersPage() {
 
                           <span className="badge">
                             {Number(
-                              item.quantity ||
-                                0
+                              item.quantity || 0
                             ).toLocaleString()}{" "}
                             available
                           </span>
+
                         </div>
                       </div>
 
                       <div className="result-right">
+
                         <div>
                           <div className="customer-label">
-                            Customer
-                            Price
+                            Customer Price
                           </div>
 
                           <div className="customer-price">
@@ -1850,19 +1610,16 @@ export default function NumbersPage() {
                         <button
                           type="button"
                           className="buy-button"
-                          disabled={
-                            buying
-                          }
+                          disabled={buying}
                           onClick={() =>
-                            buyNumber(
-                              item
-                            )
+                            buyNumber(item)
                           }
                         >
                           {buying
                             ? "Processing..."
                             : "Buy Number"}
                         </button>
+
                       </div>
                     </div>
                   </div>
@@ -1873,7 +1630,7 @@ export default function NumbersPage() {
             <section className="empty">
               <div>
                 <div className="empty-icon">
-                  📱
+                  ??
                 </div>
 
                 <div className="empty-title">
@@ -1881,15 +1638,13 @@ export default function NumbersPage() {
                 </div>
 
                 <div className="empty-text">
-                  Select a country,
-                  operator and
-                  service above,
+                  Search for a country and
+                  service, select an operator,
                   then press{" "}
                   <strong>
                     Search Numbers
                   </strong>{" "}
-                  to check live
-                  availability.
+                  to check live availability.
                 </div>
               </div>
             </section>
