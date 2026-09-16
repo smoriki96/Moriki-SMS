@@ -33,9 +33,8 @@ type SearchResult = {
 };
 
 const REQUEST_TIMEOUT = 15000;
-
 function naira(value: number) {
-  return `?${Number(value || 0).toLocaleString("en-NG")}`;
+  return `₦${Number(value || 0).toLocaleString("en-NG")}`;
 }
 
 function pretty(value: string) {
