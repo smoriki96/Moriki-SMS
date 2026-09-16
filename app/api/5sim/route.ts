@@ -13,52 +13,64 @@ const FIVESIM_API_KEY =
 const FIVESIM_BASE_URL =
   "https://5sim.net/v1";
 
-const USD_TO_NGN = 1400;
-const PROFIT_NGN = 700;
-
 const CUSTOMER_ERROR =
   "Service unavailable at the moment, please try another service.";
+
+const USD_TO_NGN = 1400;
+const PROFIT_NGN = 700;
 
 const supabaseAdmin = createClient(
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY
 );
 
-function jsonResponse(
-  data: unknown,
-  status = 200
-) {
-  return NextResponse.json(data, {
-    status,
-    headers: {
-      "Cache-Control": "no-store",
-    },
-  });
-}
-
-function errorResponse(
-  error: unknown,
-  status = 500
-) {
-  console.error("5SIM INTERNAL ERROR:", error);
-
-  return jsonResponse(
-    {
-      success: false,
-      error: CUSTOMER_ERROR,
-    },
-    status
-  );
-}
-
-function calculateCustomerPrice(
-  priceUSD: number
-) {
+function calculateCustomerPrice(priceUSD: number) {
   return Math.round(
     priceUSD * USD_TO_NGN + PROFIT_NGN
   );
 }
 
+function safeErrorResponse(
+  internalError: unknown,
+  status = 500
+) {
+  console.error(
+    "5SIM INTERNAL ERROR:",
+    internalError
+  );
+
+  return NextResponse.json(
+    {
+      success: false,
+      error: CUSTOMER_ERROR,
+    },
+    {
+      status,
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    }
+  );
+}
+
+function successResponse(data: Record<string, unknown>) {
+  return NextResponse.json(
+    {
+      success: true,
+      ...data,
+    },
+    {
+      status: 200,
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    }
+  );
+}
+
+/*
+ * AUTHENTICATED USER
+ */
 async function getAuthenticatedUser(
   request: NextRequest
 ) {
@@ -89,7 +101,7 @@ async function getAuthenticatedUser(
 
   if (error || !user) {
     console.error(
-      "5SIM AUTH ERROR:",
+      "SUPABASE AUTH ERROR:",
       error
     );
 
@@ -99,6 +111,9 @@ async function getAuthenticatedUser(
   return user;
 }
 
+/*
+ * 5SIM REQUEST
+ */
 async function fiveSimRequest(
   path: string,
   options: RequestInit = {}
@@ -129,7 +144,7 @@ async function fiveSimRequest(
     const rawText =
       await response.text();
 
-    let data: unknown = null;
+    let data: any = null;
 
     try {
       data = rawText
@@ -141,17 +156,16 @@ async function fiveSimRequest(
 
     if (!response.ok) {
       console.error(
-        "5SIM PROVIDER ERROR:",
+        "5SIM ERROR",
         {
           status: response.status,
-          statusText: response.statusText,
           path,
           response: data,
         }
       );
 
       throw new Error(
-        `5SIM request failed: ${response.status}`
+        `5SIM HTTP ${response.status}`
       );
     }
 
@@ -162,294 +176,162 @@ async function fiveSimRequest(
 }
 
 /*
-|--------------------------------------------------------------------------
-| GET
-|--------------------------------------------------------------------------
-|
-| Supported actions:
-|
-| countries
-| operators
-| services
-| products
-| prices
-| check
-|
-*/
+ * Convert 5SIM countries object
+ * into the array your frontend expects.
+ */
+function normalizeCountries(data: any) {
+  if (
+    !data ||
+    typeof data !== "object" ||
+    Array.isArray(data)
+  ) {
+    return [];
+  }
 
+  return Object.entries(data)
+    .map(
+      ([key, value]: [string, any]) => {
+        if (
+          !value ||
+          typeof value !== "object"
+        ) {
+          return null;
+        }
+
+        const ignoredKeys = new Set([
+          "iso",
+          "prefix",
+          "text_en",
+          "text_ru",
+          "name",
+          "code",
+        ]);
+
+        const operators =
+          Object.keys(value)
+            .filter(
+              (operator) =>
+                !ignoredKeys.has(operator) &&
+                value[operator] &&
+                typeof value[operator] ===
+                  "object"
+            )
+            .sort();
+
+        return {
+          key: key.toLowerCase(),
+          name:
+            value.text_en ||
+            value.name ||
+            key,
+          operators,
+        };
+      }
+    )
+    .filter(Boolean);
+}
+
+/*
+ * Convert 5SIM products object
+ * into your Product[] format.
+ */
+function normalizeProducts(
+  data: any
+) {
+  if (
+    !data ||
+    typeof data !== "object" ||
+    Array.isArray(data)
+  ) {
+    return [];
+  }
+
+  return Object.entries(data)
+    .map(
+      ([name, value]: [string, any]) => {
+        const priceUSD = Number(
+          value?.Price ?? 0
+        );
+
+        const quantity = Number(
+          value?.Qty ?? 0
+        );
+
+        return {
+          name,
+          category:
+            value?.Category ?? null,
+          quantity,
+          priceUSD,
+          basePriceNGN:
+            Math.round(
+              priceUSD * USD_TO_NGN
+            ),
+          profitNGN: PROFIT_NGN,
+          priceNGN:
+            calculateCustomerPrice(
+              priceUSD
+            ),
+        };
+      }
+    )
+    .sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+}
+
+/*
+ * GET
+ */
 export async function GET(
   request: NextRequest
 ) {
   try {
-    const user =
-      await getAuthenticatedUser(
-        request
-      );
-
-    if (!user) {
-      return jsonResponse(
-        {
-          success: false,
-          error:
-            "Authentication required.",
-        },
-        401
-      );
-    }
-
-    const { searchParams } =
-      new URL(request.url);
+    const {
+      searchParams,
+    } = new URL(request.url);
 
     const action =
       searchParams.get("action");
 
     /*
-    |--------------------------------------------------------------------------
-    | COUNTRIES
-    |--------------------------------------------------------------------------
-    |
-    | GET /api/5sim?action=countries
-    |
-    */
-
+     * ========================================
+     * COUNTRIES
+     * ========================================
+     */
     if (action === "countries") {
       const result =
         await fiveSimRequest(
           "/guest/countries"
         );
 
-      const countries = Object.entries(
-        (result || {}) as Record<
-          string,
-          any
-        >
-      ).map(
-        ([code, value]) => ({
-          code,
-          name:
-            value?.text_en ||
-            value?.name ||
-            code,
-          iso:
-            value?.iso
-              ? Object.keys(
-                  value.iso
-                )[0] || ""
-              : "",
-          prefix:
-            value?.prefix
-              ? Object.keys(
-                  value.prefix
-                )[0] || ""
-              : "",
-        })
-      );
+      const countries =
+        normalizeCountries(result);
 
-      return jsonResponse({
-        success: true,
+      return successResponse({
         countries,
-        result,
       });
     }
 
     /*
-    |--------------------------------------------------------------------------
-    | OPERATORS
-    |--------------------------------------------------------------------------
-    |
-    | GET /api/5sim?action=operators&country=usa
-    |
-    | 5SIM does not provide a reliable public
-    | guest operators endpoint. Operators are
-    | contained inside the countries response.
-    |
-    */
-
-    if (action === "operators") {
-      const country =
-        searchParams.get(
-          "country"
-        );
-
-      if (!country) {
-        return jsonResponse(
-          {
-            success: false,
-            error:
-              "Country is required.",
-          },
-          400
-        );
-      }
-
-      const result =
-        await fiveSimRequest(
-          "/guest/countries"
-        );
-
-      const countryData =
-        (
-          result as Record<
-            string,
-            any
-          >
-        )?.[country];
-
-      if (!countryData) {
-        return jsonResponse(
-          {
-            success: true,
-            operators: [],
-          }
-        );
-      }
-
-      const ignoredKeys =
-        new Set([
-          "iso",
-          "prefix",
-          "text_en",
-          "text_ru",
-          "name",
-        ]);
-
-      const operators =
-        Object.keys(
-          countryData
-        )
-          .filter(
-            (operator) =>
-              !ignoredKeys.has(
-                operator
-              )
-          )
-          .map(
-            (operator) => ({
-              name: operator,
-              code: operator,
-            })
-          );
-
-      return jsonResponse({
-        success: true,
-        country,
-        operators,
-      });
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | SERVICES
-    |--------------------------------------------------------------------------
-    |
-    | GET /api/5sim?action=services&country=usa&operator=any
-    |
-    */
-
-    if (action === "services") {
-      const country =
-        searchParams.get(
-          "country"
-        );
-
-      const operator =
-        searchParams.get(
-          "operator"
-        ) || "any";
-
-      if (!country) {
-        return jsonResponse(
-          {
-            success: false,
-            error:
-              "Country is required.",
-          },
-          400
-        );
-      }
-
-      const result =
-        await fiveSimRequest(
-          `/guest/products/${encodeURIComponent(
-            country
-          )}/${encodeURIComponent(
-            operator
-          )}`
-        );
-
-      const services =
-        Object.entries(
-          (result || {}) as Record<
-            string,
-            any
-          >
-        ).map(
-          ([service, data]) => ({
-            service,
-            name: service,
-            category:
-              data?.Category ||
-              "activation",
-            available:
-              Number(
-                data?.Qty || 0
-              ),
-            priceUSD:
-              Number(
-                data?.Price || 0
-              ),
-            priceNGN:
-              calculateCustomerPrice(
-                Number(
-                  data?.Price || 0
-                )
-              ),
-          })
-        );
-
-      return jsonResponse({
-        success: true,
-        country,
-        operator,
-        services,
-        result,
-      });
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | PRODUCTS
-    |--------------------------------------------------------------------------
-    |
-    | This keeps compatibility with the existing
-    | frontend.
-    |
-    | GET:
-    | /api/5sim?action=products&country=usa&operator=any
-    |
-    */
-
+     * ========================================
+     * PRODUCTS / SERVICES
+     * ========================================
+     */
     if (
       action === "products" ||
       action === "product"
     ) {
       const country =
-        searchParams.get(
-          "country"
-        );
+        searchParams.get("country");
 
       const operator =
-        searchParams.get(
-          "operator"
-        ) || "any";
+        searchParams.get("operator") ||
+        "any";
 
       if (!country) {
-        return jsonResponse(
-          {
-            success: false,
-            error:
-              "Country is required.",
-          },
+        return safeErrorResponse(
+          "Missing country.",
           400
         );
       }
@@ -463,88 +345,313 @@ export async function GET(
           )}`
         );
 
-      return jsonResponse({
-        success: true,
+      const products =
+        normalizeProducts(result);
+
+      return successResponse({
         country,
         operator,
-        result,
+        products,
       });
     }
 
     /*
-    |--------------------------------------------------------------------------
-    | PRICES
-    |--------------------------------------------------------------------------
-    |
-    | This is useful after the customer chooses:
-    | country + service.
-    |
-    | GET:
-    | /api/5sim?action=prices&country=usa&service=telegram
-    |
-    */
-
-    if (action === "prices") {
+     * ========================================
+     * SEARCH
+     * ========================================
+     */
+    if (action === "search") {
       const country =
-        searchParams.get(
-          "country"
-        );
+        searchParams.get("country");
 
-      const service =
-        searchParams.get(
-          "service"
-        );
+      const operator =
+        searchParams.get("operator") ||
+        "any";
+
+      const product =
+        searchParams.get("product");
 
       if (
         !country ||
-        !service
+        !operator ||
+        !product
       ) {
-        return jsonResponse(
-          {
-            success: false,
-            error:
-              "Country and service are required.",
-          },
+        return safeErrorResponse(
+          "Missing search parameters.",
           400
         );
       }
 
       const result =
         await fiveSimRequest(
-          `/guest/prices?country=${encodeURIComponent(
+          `/guest/products/${encodeURIComponent(
             country
-          )}&product=${encodeURIComponent(
-            service
+          )}/${encodeURIComponent(
+            operator
           )}`
         );
 
-      return jsonResponse({
-        success: true,
+      const products =
+        normalizeProducts(result);
+
+      const found =
+        products.find(
+          (item) =>
+            item.name.toLowerCase() ===
+            product.toLowerCase()
+        );
+
+      if (!found) {
+        return successResponse({
+          country,
+          operator,
+          product,
+          quantity: 0,
+          priceUSD: 0,
+          basePriceNGN: 0,
+          profitNGN: 0,
+          priceNGN: 0,
+        });
+      }
+
+      return successResponse({
         country,
-        service,
-        result,
+        operator,
+        product: found.name,
+        quantity: found.quantity,
+        priceUSD: found.priceUSD,
+        basePriceNGN:
+          found.basePriceNGN,
+        profitNGN:
+          found.profitNGN,
+        priceNGN:
+          found.priceNGN,
       });
     }
 
     /*
-    |--------------------------------------------------------------------------
-    | CHECK ORDER
-    |--------------------------------------------------------------------------
-    */
+     * ========================================
+     * BUY NUMBER
+     * ========================================
+     */
+    if (action === "buy") {
+      const user =
+        await getAuthenticatedUser(
+          request
+        );
 
+      if (!user) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              "Authentication required.",
+          },
+          { status: 401 }
+        );
+      }
+
+      const country =
+        searchParams.get("country");
+
+      const operator =
+        searchParams.get("operator") ||
+        "any";
+
+      const product =
+        searchParams.get("product");
+
+      if (
+        !country ||
+        !operator ||
+        !product
+      ) {
+        return safeErrorResponse(
+          "Missing purchase parameters.",
+          400
+        );
+      }
+
+      /*
+       * First get live product price
+       * from 5SIM.
+       */
+      const productResponse =
+        await fiveSimRequest(
+          `/guest/products/${encodeURIComponent(
+            country
+          )}/${encodeURIComponent(
+            operator
+          )}`
+        );
+
+      const products =
+        normalizeProducts(
+          productResponse
+        );
+
+      const selectedProduct =
+        products.find(
+          (item) =>
+            item.name.toLowerCase() ===
+            product.toLowerCase()
+        );
+
+      if (!selectedProduct) {
+        return safeErrorResponse(
+          "Selected service is no longer available.",
+          400
+        );
+      }
+
+      if (
+        selectedProduct.quantity <= 0
+      ) {
+        return safeErrorResponse(
+          "No numbers are currently available.",
+          400
+        );
+      }
+
+      /*
+       * BUY FROM 5SIM
+       */
+      const activation =
+        await fiveSimRequest(
+          `/user/buy/activation/${encodeURIComponent(
+            country
+          )}/${encodeURIComponent(
+            operator
+          )}/${encodeURIComponent(
+            product
+          )}`
+        );
+
+      const providerPriceUSD =
+        Number(
+          activation?.price ??
+          selectedProduct.priceUSD
+        );
+
+      const customerPrice =
+        calculateCustomerPrice(
+          providerPriceUSD
+        );
+
+      /*
+       * Record the purchase.
+       */
+      const {
+        data: purchase,
+        error:
+          purchaseError,
+      } =
+        await supabaseAdmin.rpc(
+          "complete_5sim_purchase",
+          {
+            p_user_id:
+              user.id,
+
+            p_amount:
+              customerPrice,
+
+            p_provider_cost:
+              Math.round(
+                providerPriceUSD *
+                  USD_TO_NGN
+              ),
+
+            p_fivesim_order_id:
+              String(
+                activation?.id ?? ""
+              ),
+
+            p_phone_number:
+              activation?.phone ??
+              "",
+
+            p_country:
+              country,
+
+            p_service:
+              product,
+
+            p_status:
+              "PENDING",
+
+            p_payment_reference:
+              null,
+          }
+        );
+
+      if (purchaseError) {
+        /*
+         * IMPORTANT:
+         * The number has already been purchased
+         * from 5SIM at this point.
+         *
+         * We log the database failure so it can
+         * be reconciled rather than pretending
+         * the provider purchase did not happen.
+         */
+        console.error(
+          "5SIM PURCHASE DB ERROR",
+          {
+            purchaseError,
+            activation,
+          }
+        );
+
+        throw purchaseError;
+      }
+
+      return successResponse({
+        data: activation,
+        orderId:
+          activation?.id,
+        purchase,
+        amount:
+          customerPrice,
+        providerCost:
+          Math.round(
+            providerPriceUSD *
+              USD_TO_NGN
+          ),
+        profit:
+          PROFIT_NGN,
+      });
+    }
+
+    /*
+     * ========================================
+     * CHECK SMS
+     * ========================================
+     */
     if (action === "check") {
+      const user =
+        await getAuthenticatedUser(
+          request
+        );
+
+      if (!user) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              "Authentication required.",
+          },
+          { status: 401 }
+        );
+      }
+
       const orderId =
         searchParams.get(
           "orderId"
         );
 
       if (!orderId) {
-        return jsonResponse(
-          {
-            success: false,
-            error:
-              "Missing 5SIM order ID.",
-          },
+        return safeErrorResponse(
+          "Missing order ID.",
           400
         );
       }
@@ -556,458 +663,17 @@ export async function GET(
           )}`
         );
 
-      return jsonResponse({
-        success: true,
+      return successResponse({
         result,
       });
     }
 
-    return jsonResponse(
-      {
-        success: false,
-        error:
-          "Unknown 5SIM action.",
-      },
+    return safeErrorResponse(
+      `Unknown 5SIM action: ${action}`,
       400
     );
   } catch (error) {
-    return errorResponse(
-      error,
-      500
-    );
-  }
-}
-
-/*
-|--------------------------------------------------------------------------
-| POST - PURCHASE
-|--------------------------------------------------------------------------
-*/
-
-export async function POST(
-  request: NextRequest
-) {
-  try {
-    const user =
-      await getAuthenticatedUser(
-        request
-      );
-
-    if (!user) {
-      return jsonResponse(
-        {
-          success: false,
-          error:
-            "Authentication required.",
-        },
-        401
-      );
-    }
-
-    let body: Record<
-      string,
-      unknown
-    >;
-
-    try {
-      body =
-        await request.json();
-    } catch {
-      return jsonResponse(
-        {
-          success: false,
-          error:
-            "Invalid request.",
-        },
-        400
-      );
-    }
-
-    const country =
-      String(
-        body.country || ""
-      ).trim();
-
-    const operator =
-      String(
-        body.operator ||
-          "any"
-      ).trim();
-
-    const service =
-      String(
-        body.service || ""
-      ).trim();
-
-    const maxPriceRaw =
-      body.maxPrice;
-
-    const maxPrice =
-      maxPriceRaw !== undefined &&
-      maxPriceRaw !== null &&
-      String(
-        maxPriceRaw
-      ).trim() !== ""
-        ? Number(maxPriceRaw)
-        : undefined;
-
-    if (
-      !country ||
-      !service
-    ) {
-      return jsonResponse(
-        {
-          success: false,
-          error:
-            "Country and service are required.",
-        },
-        400
-      );
-    }
-
-    if (
-      maxPrice !== undefined &&
-      (!Number.isFinite(
-        maxPrice
-      ) ||
-        maxPrice <= 0)
-    ) {
-      return jsonResponse(
-        {
-          success: false,
-          error:
-            "Invalid maximum price.",
-        },
-        400
-      );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Get available product first.
-    |--------------------------------------------------------------------------
-    */
-
-    const products =
-      await fiveSimRequest(
-        `/guest/products/${encodeURIComponent(
-          country
-        )}/${encodeURIComponent(
-          operator
-        )}`
-      );
-
-    const productData =
-      (
-        products as Record<
-          string,
-          any
-        >
-      )?.[service];
-
-    if (!productData) {
-      return jsonResponse(
-        {
-          success: false,
-          error:
-            "This service is not available for the selected country and operator.",
-        },
-        400
-      );
-    }
-
-    const priceUSD =
-      Number(
-        productData.Price || 0
-      );
-
-    const available =
-      Number(
-        productData.Qty || 0
-      );
-
-    if (
-      !Number.isFinite(
-        priceUSD
-      ) ||
-      priceUSD <= 0
-    ) {
-      return jsonResponse(
-        {
-          success: false,
-          error:
-            "Service price is unavailable.",
-        },
-        400
-      );
-    }
-
-    if (
-      available <= 0
-    ) {
-      return jsonResponse(
-        {
-          success: false,
-          error:
-            "No numbers are currently available for this service.",
-        },
-        400
-      );
-    }
-
-    if (
-      maxPrice !== undefined &&
-      priceUSD > maxPrice
-    ) {
-      return jsonResponse(
-        {
-          success: false,
-          error:
-            "The current provider price is above your selected maximum price.",
-        },
-        400
-      );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Customer price
-    |--------------------------------------------------------------------------
-    */
-
-    const customerPrice =
-      calculateCustomerPrice(
-        priceUSD
-      );
-
-    const providerCost =
-      Math.round(
-        priceUSD *
-          USD_TO_NGN
-      );
-
-    /*
-    |--------------------------------------------------------------------------
-    | Check wallet before buying.
-    |--------------------------------------------------------------------------
-    */
-
-    const {
-      data: wallet,
-      error: walletError,
-    } =
-      await supabaseAdmin
-        .from("wallets")
-        .select("balance")
-        .eq(
-          "user_id",
-          user.id
-        )
-        .maybeSingle();
-
-    if (walletError) {
-      throw walletError;
-    }
-
-    const balance =
-      Number(
-        wallet?.balance || 0
-      );
-
-    if (
-      balance <
-      customerPrice
-    ) {
-      return jsonResponse(
-        {
-          success: false,
-          error:
-            "Not enough user balance.",
-        },
-        400
-      );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | BUY FROM 5SIM
-    |--------------------------------------------------------------------------
-    */
-
-    let purchasePath =
-      `/user/buy/activation/${encodeURIComponent(
-        country
-      )}/${encodeURIComponent(
-        operator
-      )}/${encodeURIComponent(
-        service
-      )}`;
-
-    if (
-      maxPrice !== undefined
-    ) {
-      purchasePath +=
-        `?maxPrice=${encodeURIComponent(
-          maxPrice
-        )}`;
-    }
-
-    const providerOrder =
-      await fiveSimRequest(
-        purchasePath
-      );
-
-    const providerOrderData =
-      providerOrder as Record<
-        string,
-        any
-      >;
-
-    const fivesimOrderId =
-      Number(
-        providerOrderData?.id ||
-          0
-      );
-
-    const phoneNumber =
-      String(
-        providerOrderData?.phone ||
-          ""
-      );
-
-    const actualProviderPrice =
-      Number(
-        providerOrderData?.price ||
-          priceUSD
-      );
-
-    if (
-      !fivesimOrderId ||
-      !phoneNumber
-    ) {
-      console.error(
-        "5SIM PURCHASE RETURNED INVALID ORDER:",
-        providerOrder
-      );
-
-      throw new Error(
-        "5SIM returned an invalid order."
-      );
-    }
-
-    const actualProviderCost =
-      Math.round(
-        actualProviderPrice *
-          USD_TO_NGN
-      );
-
-    const actualCustomerPrice =
-      calculateCustomerPrice(
-        actualProviderPrice
-      );
-
-    /*
-    |--------------------------------------------------------------------------
-    | Complete the purchase in our database.
-    |--------------------------------------------------------------------------
-    */
-
-    const {
-      data: purchase,
-      error: purchaseError,
-    } =
-      await supabaseAdmin.rpc(
-        "complete_5sim_purchase",
-        {
-          p_user_id:
-            user.id,
-
-          p_amount:
-            actualCustomerPrice,
-
-          p_provider_cost:
-            actualProviderCost,
-
-          p_fivesim_order_id:
-            fivesimOrderId,
-
-          p_phone_number:
-            phoneNumber,
-
-          p_country:
-            country,
-
-          p_service:
-            service,
-
-          p_status:
-            String(
-              providerOrderData?.status ||
-                "PENDING"
-            ),
-
-          p_payment_reference:
-            null,
-        }
-      );
-
-    if (purchaseError) {
-      console.error(
-        "DATABASE PURCHASE ERROR:",
-        purchaseError
-      );
-
-      /*
-      If our wallet/database purchase
-      fails after 5SIM already issued
-      the number, try to cancel it.
-      */
-
-      try {
-        await fiveSimRequest(
-          `/user/cancel/${encodeURIComponent(
-            String(
-              fivesimOrderId
-            )
-          )}`
-        );
-      } catch (
-        cancelError
-      ) {
-        console.error(
-          "5SIM CANCEL AFTER DB FAILURE ERROR:",
-          cancelError
-        );
-      }
-
-      throw purchaseError;
-    }
-
-    return jsonResponse({
-      success: true,
-
-      order:
-        providerOrder,
-
-      result:
-        purchase,
-
-      amount:
-        actualCustomerPrice,
-
-      providerCost:
-        actualProviderCost,
-
-      profit:
-        actualCustomerPrice -
-        actualProviderCost,
-
-      phoneNumber,
-
-      fivesimOrderId,
-    });
-  } catch (error) {
-    return errorResponse(
+    return safeErrorResponse(
       error,
       500
     );
