@@ -282,9 +282,7 @@ function ActivationContent() {
         );
 
         setMessage(
-          err instanceof Error
-            ? err.message
-            : "Unable to check activation."
+          ""
         );
       } finally {
         checkRunning.current =
