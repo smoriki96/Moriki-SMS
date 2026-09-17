@@ -158,7 +158,7 @@ export default function CustomerDashboard() {
     const message =
       "Hello Moriki SMS, I need help with my account/order.";
 
-    const url = `https://wa.me/2349041518544?text=${encodeURIComponent(
+    const url = `https://wa.me/2347045631047?text=${encodeURIComponent(
       message
     )}`;
 

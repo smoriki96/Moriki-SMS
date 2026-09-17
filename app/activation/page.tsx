@@ -190,7 +190,7 @@ function ActivationContent() {
         const response =
           await fetch(
             `/api/5sim?action=check&orderId=${encodeURIComponent(
-              orderId
+              String(order?.fivesim_order_id)
             )}`,
             {
               method: "GET",
