@@ -503,6 +503,19 @@ export default function DashboardPage() {
             </div>
           </div>
         )}
+      {/* WHATSAPP SUPPORT */}
+      <a
+        href="https://wa.me/2347045631047"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Contact Moriki SMS on WhatsApp"
+        className="fixed bottom-5 right-5 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-950/40 transition hover:scale-105 hover:bg-emerald-400"
+      >
+        <span className="text-sm font-black" aria-hidden="true">
+          WA
+        </span>
+      </a>
+
     </main>
   );
 }
