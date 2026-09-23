@@ -504,16 +504,59 @@ export default function DashboardPage() {
           </div>
         )}
       {/* WHATSAPP SUPPORT */}
+      <style>{`
+        @keyframes whatsappShake {
+          0%, 70%, 100% {
+            transform: rotate(0deg);
+          }
+          72% {
+            transform: rotate(-10deg);
+          }
+          74% {
+            transform: rotate(10deg);
+          }
+          76% {
+            transform: rotate(-8deg);
+          }
+          78% {
+            transform: rotate(8deg);
+          }
+          80% {
+            transform: rotate(0deg);
+          }
+        }
+
+        .whatsapp-support-button {
+          animation: whatsappShake 3.5s ease-in-out infinite;
+        }
+
+        .whatsapp-support-button:hover {
+          animation-play-state: paused;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .whatsapp-support-button {
+            animation: none;
+          }
+        }
+      `}</style>
+
       <a
         href="https://wa.me/2347045631047"
         target="_blank"
         rel="noopener noreferrer"
         aria-label="Contact Moriki SMS on WhatsApp"
-        className="fixed bottom-5 right-5 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-950/40 transition hover:scale-105 hover:bg-emerald-400"
+        title="Chat with Moriki SMS on WhatsApp"
+        className="whatsapp-support-button fixed bottom-5 right-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#25D366] text-white shadow-xl shadow-emerald-950/40 transition hover:scale-110 hover:bg-[#20bd5a]"
       >
-        <span className="text-sm font-black" aria-hidden="true">
-          WA
-        </span>
+        <svg
+          viewBox="0 0 32 32"
+          className="h-8 w-8"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path d="M16 3C8.82 3 3 8.82 3 16c0 2.29.6 4.44 1.74 6.33L3.08 29l6.84-1.62A12.94 12.94 0 0 0 16 29c7.18 0 13-5.82 13-13S23.18 3 16 3Zm0 23.66c-2.05 0-4.05-.55-5.81-1.59l-.42-.25-4.06.96.99-3.95-.27-.43A10.9 10.9 0 1 1 16 26.66Zm5.98-8.18c-.33-.16-1.94-.96-2.24-1.07-.3-.11-.52-.16-.74.16-.22.33-.85 1.07-1.04 1.29-.19.22-.38.25-.71.08-.33-.16-1.39-.51-2.65-1.63-.98-.87-1.64-1.94-1.83-2.27-.19-.33-.02-.5.14-.66.15-.15.33-.38.49-.57.16-.19.22-.33.33-.55.11-.22.05-.41-.03-.57-.08-.16-.74-1.79-1.02-2.45-.27-.64-.54-.55-.74-.56h-.63c-.22 0-.57.08-.87.41-.3.33-1.14 1.11-1.14 2.71s1.17 3.14 1.33 3.36c.16.22 2.3 3.51 5.57 4.92.78.34 1.39.54 1.86.69.78.25 1.49.22 2.05.13.63-.09 1.94-.79 2.21-1.55.27-.76.27-1.41.19-1.55-.08-.14-.3-.22-.63-.38Z" />
+        </svg>
       </a>
 
     </main>

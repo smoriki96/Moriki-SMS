@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -222,7 +222,7 @@ export default function SupportPage() {
       <header className="border-b border-slate-800 bg-slate-950/95">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
           <Link
-            href="/admin/dashboard"
+            href="/dashboard"
             className="flex items-center gap-3"
           >
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white font-black text-slate-950">
@@ -238,7 +238,7 @@ export default function SupportPage() {
           </Link>
 
           <Link
-            href="/admin/dashboard"
+            href="/dashboard"
             className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
           >
             Back to Dashboard
@@ -515,7 +515,7 @@ export default function SupportPage() {
 
         <div className="mt-8 text-center">
           <Link
-            href="/admin/dashboard"
+            href="/dashboard"
             className="text-sm text-slate-400 transition hover:text-white"
           >
             Back to Dashboard
