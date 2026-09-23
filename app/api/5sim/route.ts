@@ -627,6 +627,11 @@ export async function GET(
      * CHECK SMS
      * ========================================
      */
+    /*
+     * ========================================
+     * CHECK SMS
+     * ========================================
+     */
     if (action === "check") {
       const user =
         await getAuthenticatedUser(
@@ -673,11 +678,12 @@ export async function GET(
           ? result.sms
           : [];
 
+      const hasSms =
+        sms.length > 0;
+
       const normalizedStatus =
-        sms.length > 0 ||
-        providerStatus === "received" ||
-        providerStatus === "finished"
-          ? "COMPLETED"
+        hasSms
+          ? "RECEIVED"
           : providerStatus === "canceled" ||
             providerStatus === "cancelled" ||
             providerStatus === "timeout" ||
@@ -685,28 +691,109 @@ export async function GET(
           ? "CANCELLED"
           : "PENDING";
 
-      const { error: updateError } =
-        await supabaseAdmin
-          .from("orders")
-          .update({
-            order_status: normalizedStatus,
-            status: normalizedStatus,
-          })
-          .eq(
-            "fivesim_order_id",
-            String(orderId)
-          );
+      const {
+        data: localOrder,
+        error: localOrderError,
+      } = await supabaseAdmin
+        .from("orders")
+        .select(
+          "id, verification_code, order_status, status"
+        )
+        .eq(
+          "fivesim_order_id",
+          Number(orderId)
+        )
+        .eq(
+          "user_id",
+          user.id
+        )
+        .maybeSingle();
 
-      if (updateError) {
+      if (localOrderError) {
         console.error(
-          "Unable to update activation status:",
-          updateError.message
+          "Unable to find local activation:",
+          localOrderError.message
         );
+      }
+
+      const verificationCode =
+        sms
+          .map(
+            (item: any) =>
+              item?.code
+                ? String(item.code).trim()
+                : ""
+          )
+          .find(
+            (code: string) =>
+              code.length > 0
+          ) || null;
+
+      if (localOrder) {
+        const updateData: Record<
+          string,
+          unknown
+        > = {};
+
+        if (hasSms) {
+          updateData.order_status =
+            "RECEIVED";
+
+          updateData.status =
+            "RECEIVED";
+
+          if (verificationCode) {
+            updateData.verification_code =
+              verificationCode;
+          }
+        } else if (
+          String(
+            localOrder.order_status || ""
+          ).toUpperCase() !==
+            "RECEIVED" &&
+          String(
+            localOrder.status || ""
+          ).toUpperCase() !==
+            "RECEIVED"
+        ) {
+          updateData.order_status =
+            normalizedStatus;
+
+          updateData.status =
+            normalizedStatus;
+        }
+
+        if (
+          Object.keys(updateData)
+            .length > 0
+        ) {
+          const {
+            error: updateError,
+          } = await supabaseAdmin
+            .from("orders")
+            .update(updateData)
+            .eq(
+              "id",
+              localOrder.id
+            )
+            .eq(
+              "user_id",
+              user.id
+            );
+
+          if (updateError) {
+            console.error(
+              "Unable to update activation:",
+              updateError.message
+            );
+          }
+        }
       }
 
       return successResponse({
         result,
-        status: normalizedStatus,
+        status:
+          normalizedStatus,
         phone:
           result?.phone ?? null,
         country:
@@ -714,6 +801,8 @@ export async function GET(
         service:
           result?.service ?? null,
         sms,
+        verification_code:
+          verificationCode,
         fivesim_order_id:
           result?.id ?? orderId,
       });
