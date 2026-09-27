@@ -361,14 +361,12 @@ export default function DashboardPage() {
             Quick actions
           </h2>
 
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <Link
               href="/numbers"
               className="flex min-h-[76px] flex-col items-center justify-center rounded-xl border border-slate-800 bg-slate-900 px-1 py-2 text-center transition hover:border-blue-500/40 hover:bg-slate-800"
             >
-              <div className="text-xl">
-                📱
-              </div>
+              <div className="text-xl">📱</div>
 
               <div className="mt-1 text-[10px] font-semibold">
                 Numbers
@@ -379,9 +377,7 @@ export default function DashboardPage() {
               href="/orders"
               className="flex min-h-[76px] flex-col items-center justify-center rounded-xl border border-slate-800 bg-slate-900 px-1 py-2 text-center transition hover:border-blue-500/40 hover:bg-slate-800"
             >
-              <div className="text-xl">
-                🧾
-              </div>
+              <div className="text-xl">🧾</div>
 
               <div className="mt-1 text-[10px] font-semibold">
                 Orders
@@ -392,9 +388,7 @@ export default function DashboardPage() {
               href="/wallet"
               className="flex min-h-[76px] flex-col items-center justify-center rounded-xl border border-slate-800 bg-slate-900 px-1 py-2 text-center transition hover:border-blue-500/40 hover:bg-slate-800"
             >
-              <div className="text-xl">
-                💰
-              </div>
+              <div className="text-xl">💰</div>
 
               <div className="mt-1 text-[10px] font-semibold">
                 Wallet
@@ -402,12 +396,21 @@ export default function DashboardPage() {
             </Link>
 
             <Link
+              href="/boosting"
+              className="flex min-h-[76px] flex-col items-center justify-center rounded-xl border border-slate-800 bg-slate-900 px-1 py-2 text-center transition hover:border-blue-500/40 hover:bg-slate-800"
+            >
+              <div className="text-xl">📈</div>
+
+              <div className="mt-1 text-[10px] font-semibold text-slate-300">
+                Social Boost
+              </div>
+            </Link>
+
+            <Link
               href="/account"
               className="flex min-h-[76px] flex-col items-center justify-center rounded-xl border border-slate-800 bg-slate-900 px-1 py-2 text-center transition hover:border-blue-500/40 hover:bg-slate-800"
             >
-              <div className="text-xl">
-                👤
-              </div>
+              <div className="text-xl">👤</div>
 
               <div className="mt-1 text-[10px] font-semibold">
                 Account
@@ -415,7 +418,6 @@ export default function DashboardPage() {
             </Link>
           </div>
         </div>
-
         {/* SECURITY BANNER */}
         <div className="mb-3 flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-sm">
